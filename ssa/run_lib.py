@@ -16,20 +16,26 @@ import logging
 import functools
 from flax.metrics import tensorboard
 from flax.training import checkpoints
-# Keep the import below for registering all model definitions
-from models import ddpm, ncsnv2, ncsnpp
-import losses
-import sampling
-import utils
-from models import utils as mutils
-import datasets
-import evaluation
-import likelihood
-import sde_lib
+
+# TODO: Keep the import below for registering all model definitions
+from ssa.models import ddpm, ncsnv2, ncsnpp
+import ssa.losses as losses
+import ssa.sampling as sampling
+# import utils
+from ssa.models import utils as mutils
+import ssa.datasets as datasets
+import ssa.evaluation as evaluation
+import ssa.likelihood as likelihood
 from absl import flags
 
 FLAGS = flags.FLAGS
-assert 0
+
+from diffusionjax.sde import VP, VE
+from diffusionjax.utils import get_score
+from diffusionjax.solvers import EulerMaruyama
+
+
+num_devices = 1
 
 
 def evaluate(config,
@@ -61,37 +67,47 @@ def evaluate(config,
 
   # Initialize model
   rng, model_rng = jax.random.split(rng)
-  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config)
-  optimizer = losses.get_optimizer(config).create(initial_params)
-  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
-                       model_state=init_model_state,
-                       ema_rate=config.model.ema_rate,
-                       params_ema=initial_params,
-                       rng=rng)  # pytype: disable=wrong-keyword-args
+  score_model, initial_params = mutils.init_model(model_rng, config, num_devices)
 
-  checkpoint_dir = os.path.join(workdir, "checkpoints")
+  optimizer = losses.get_optimizer(config)
+  opt_state = optimizer.init(initial_params)
+
+  # sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+  # trained_score = get_score(sde, score_model, initial_params, score_scaling=True)
+
+  # optimizer = losses.get_optimizer(config).init(initial_params)  # TODO this is an opt_state that feeds into retrain_nn
+  # state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,  # TODO legacy datastruct that was used to recover a legacy flax model and state
+  #                      model_state=init_model_state,
+  #                      ema_rate=config.model.ema_rate,
+  #                      params_ema=initial_params,
+  #                      rng=rng)  # pytype: disable=wrong-keyword-args
+
+  # checkpoint_dir = os.path.join(workdir, "checkpoints")  # TODO I commented this out because it is not where checkpoints are stored
+  checkpoint_dir = workdir  # TODO I commented this out because it is not where checkpoints are stored
 
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
-    sde = sde_lib.VPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
     sampling_eps = 1e-3
   elif config.training.sde.lower() == 'subvpsde':
-    sde = sde_lib.subVPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
-    sampling_eps = 1e-3
+    # sampling_eps = 1e-3
+    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
   elif config.training.sde.lower() == 'vesde':
-    sde = sde_lib.VESDE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max, N=config.model.num_scales)
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
     sampling_eps = 1e-5
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  # Setup solver
+  solver = EulerMaruyama(sde, num_steps=config.model.num_scales)
 
   # Create the one-step evaluation function when loss computation is enabled
   if config.eval.enable_loss:
     optimize_fn = losses.optimization_manager(config)
     continuous = config.training.continuous
     likelihood_weighting = config.training.likelihood_weighting
-
     reduce_mean = config.training.reduce_mean
-    eval_step = losses.get_step_fn(sde, score_model,
+    eval_step = losses.get_step_fn(sde, solver, score_model,
                                    train=False, optimize_fn=optimize_fn,
                                    reduce_mean=reduce_mean,
                                    continuous=continuous, likelihood_weighting=likelihood_weighting)
@@ -102,6 +118,7 @@ def evaluate(config,
   train_ds_bpd, eval_ds_bpd, _ = datasets.get_dataset(config,
                                                       additional_dim=None,
                                                       uniform_dequantization=True, evaluation=True)
+
   if config.eval.bpd_dataset.lower() == 'train':
     ds_bpd = train_ds_bpd
     bpd_num_repeats = 1
@@ -141,18 +158,16 @@ def evaluate(config,
   # Restore evaluation after pre-emption
   eval_meta = EvalMeta(ckpt_id=config.eval.begin_ckpt, sampling_round_id=-1, bpd_round_id=-1, rng=rng)
   eval_meta = checkpoints.restore_checkpoint(
-    eval_dir, eval_meta, step=None, prefix=f"meta_{jax.host_id()}_")
+    eval_dir, eval_meta, step=None, prefix=f"meta_{jax.host_id()}_")  # TODO An EvalMeta object (non iterable)
 
   if eval_meta.bpd_round_id < num_bpd_rounds - 1:
     begin_ckpt = eval_meta.ckpt_id
     begin_bpd_round = eval_meta.bpd_round_id + 1
     begin_sampling_round = 0
-
   elif eval_meta.sampling_round_id < num_sampling_rounds - 1:
     begin_ckpt = eval_meta.ckpt_id
     begin_bpd_round = num_bpd_rounds
     begin_sampling_round = eval_meta.sampling_round_id + 1
-
   else:
     begin_ckpt = eval_meta.ckpt_id + 1
     begin_bpd_round = 0
@@ -165,6 +180,10 @@ def evaluate(config,
   inception_model = evaluation.get_inception_model(inceptionv3=inceptionv3)
 
   logging.info("begin checkpoint: %d" % (begin_ckpt,))
+  print("begin checkpoint: {}".format(begin_ckpt))
+  print("end checkpoint: {}".format(config.eval.end_ckpt))
+  # TODO All checkpoints won't be available, since only the best ones have been made available
+  begin_ckpt = 12
   for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
     # Wait if the target checkpoint doesn't exist yet
     waiting_message_printed = False
@@ -172,31 +191,67 @@ def evaluate(config,
     while not tf.io.gfile.exists(ckpt_filename):
       if not waiting_message_printed and jax.host_id() == 0:
         logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
+        print("Waiting for the arrival of checkpoint_%d" % (ckpt,))
+        print(tf.io.gfile.exists(ckpt_filename))
         waiting_message_printed = True
       time.sleep(60)
 
+    # state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)  # TODO: This was SS
+    state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
     # Wait for 2 additional mins in case the file exists but is not ready for reading
     try:
-      state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+      state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
     except:
       time.sleep(60)
       try:
-        state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+        state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
       except:
         time.sleep(120)
-        state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+        state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
+
+    state = mutils.State(step=state['step'],
+                        optimizer=state['optimizer'],
+                        lr=state['lr'],
+                        model_state=state['optimizer'],
+                        ema_rate=state['ema_rate'],
+                        params_ema=state['params_ema'],
+                        rng=state['rng'])  # pytype: disable=wrong-keyword-args
+
+    # #### Don't do parallel stuff and see what happens
+    # eval_iter = iter(eval_ds)
+    # for i, batch in enumerate(eval_iter):
+    #   batch['image'] = batch['image'][0][0]
+    #   batch['label'] = batch['label'][0][0]
+    #   print(batch['image'].shape, "batch image shape")
+    #   print(batch['label'].shape, "batch label shape")
+
+    #   rng, next_rng = jax.random.split(rng)
+    #   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+    #   (_, _), eval_loss = eval_step((next_rng, state), eval_batch['image'])
+    #   print(eval_loss)
+    #   assert 0
+
+    #### Don't do parallel stuff and see what happens
 
     # Replicate the training state for executing on multiple devices
     pstate = flax.jax_utils.replicate(state)
+
     # Compute the loss function on the full evaluation dataset if loss computation is enabled
     if config.eval.enable_loss:
       all_losses = []
       eval_iter = iter(eval_ds)  # pytype: disable=wrong-arg-types
       for i, batch in enumerate(eval_iter):
+        for i in batch: print(i)
+        print(batch['image'].shape, "batch image shape")
+        print(batch['label'].shape, "batch label shape")
         eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+        print(eval_batch['image'].shape)
+        print(eval_batch['label'].shape)
         rng, *next_rng = jax.random.split(rng, num=jax.local_device_count() + 1)
         next_rng = jnp.asarray(next_rng)
-        (_, _), p_eval_loss = p_eval_step((next_rng, pstate), eval_batch)
+        (_, _), p_eval_loss = p_eval_step((next_rng, pstate), eval_batch['image'])
+        print(p_eval_loss)
+        assert 0
         eval_loss = flax.jax_utils.unreplicate(p_eval_loss)
         all_losses.extend(eval_loss)
         if (i + 1) % 1000 == 0 and jax.host_id() == 0:
@@ -214,6 +269,8 @@ def evaluate(config,
       bpds = []
       begin_repeat_id = begin_bpd_round // len(ds_bpd)
       begin_batch_id = begin_bpd_round % len(ds_bpd)
+      print(begin_batch_id)
+      assert 0
       # Repeat multiple times to reduce variance when needed
       for repeat in range(begin_repeat_id, bpd_num_repeats):
         bpd_iter = iter(ds_bpd)  # pytype: disable=wrong-arg-types

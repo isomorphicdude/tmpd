@@ -32,6 +32,12 @@ def get_config():
   sampling.predictor = 'reverse_diffusion'
   sampling.corrector = 'langevin'
 
+  # TODO: BB added this since only one checkpoint is given
+  # evaluation
+  evaluate = config.eval
+  evaluate.begin_ckpt = 16
+  evaluate.end_ckpt = 16
+
   # model
   model = config.model
   model.name = 'ncsnpp'
