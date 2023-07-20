@@ -68,7 +68,7 @@ def central_crop(image, size):
   return tf.image.crop_to_bounding_box(image, top, left, size, size)
 
 
-def get_dataset(config, additional_dim=None, uniform_dequantization=False, evaluation=False):
+def get_dataset(num_devices, config, additional_dim=None, uniform_dequantization=False, evaluation=False):
   """Create data loaders for training and evaluation.
 
   Args:
@@ -83,11 +83,11 @@ def get_dataset(config, additional_dim=None, uniform_dequantization=False, evalu
   """
   # Compute batch size for this worker.
   batch_size = config.training.batch_size if not evaluation else config.eval.batch_size
-  if batch_size % jax.device_count() != 0:
+  if batch_size % num_devices != 0:
     raise ValueError(f'Batch sizes ({batch_size} must be divided by'
-                     f'the number of devices ({jax.device_count()})')
+                     f'the number of devices ({num_devices})')
 
-  per_device_batch_size = batch_size // jax.device_count()
+  per_device_batch_size = batch_size // num_devices
   # Reduce this when image resolution is too large and data pointer is stored
   shuffle_buffer_size = 10000
   prefetch_size = tf.data.experimental.AUTOTUNE

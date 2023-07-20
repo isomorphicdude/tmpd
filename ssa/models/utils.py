@@ -10,8 +10,10 @@ from ssa.models import wideresnet_noise_conditional
 from flax.training import checkpoints
 from diffusionjax.utils import batch_mul
 
-# TODO SS?
-# flax has depricated model state and flax does not have flax.optim anymore
+from diffusionjax.sde import VP, VE
+
+
+# The dataclass that stores all training states
 @flax.struct.dataclass
 class State:
   step: int
@@ -64,7 +66,7 @@ def get_sigmas(config):
   return sigmas
 
 
-def SSinit_model(rng, config, num_devices):
+def init_model(rng, config, num_devices):
   """Initialize a `flax.linen.Module` model. """
   model_name = config.model.name
   model_def = functools.partial(get_model(model_name), config=config)
@@ -79,34 +81,6 @@ def SSinit_model(rng, config, num_devices):
   # Variables is a `flax.FrozenDict`. It is immutable and respects functional programming
   init_model_state, initial_params = variables.pop('params')
   return model, init_model_state, initial_params
-
-
-def init_model(rng, config, num_devices):
-  """Initialize a `flax.linen.Module` model. """
-  # TODO: Could this be a problem in initiation?
-  model_name = config.model.name
-  print(model_name)
-  model_def = functools.partial(get_model(model_name), config=config)
-  # should num_devices not be batch size?
-  # input_shape = (num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
-  # label_shape = input_shape[:1]
-  input_shape = (num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
-  label_shape = (1,)
-  print(input_shape, "input_shape")
-  print(label_shape, "label_shape")
-
-  fake_input = jnp.zeros(input_shape)
-  fake_label = jnp.zeros(label_shape, dtype=jnp.int32)
-  params_rng, dropout_rng = jax.random.split(rng)
-  model = model_def()
-  # TODO: test on new flax version
-  variables = model.init({'params': params_rng, 'dropout': dropout_rng}, fake_input, fake_label)
-  initial_model_state, initial_params = variables.pop('params')
-  # print(initial_params['ResnetBlockBigGANpp_0']['GroupNorm_0']['scale'].shape)
-  # print(initial_params['ResnetBlockBigGANpp_0']['GroupNorm_0']['bias'].shape)
-  print(initial_params['ResnetBlockBigGANpp_0']['GroupNorm_0']['scale'].shape, "scale shape of initp")
-  print(initial_params['ResnetBlockBigGANpp_0']['GroupNorm_0']['bias'].shape, "bias shape of initp")
-  return model, initial_params
 
 
 def get_model_fn(model, params, states, train=False):
@@ -165,7 +139,7 @@ def get_score_fn(sde, model, params, states, train=False, continuous=False, retu
   """
   model_fn = get_model_fn(model, params, states, train=train)
 
-  if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
+  if isinstance(sde, VP):
     def score_fn(x, t, rng=None):
       # Scale neural network output by standard deviation and flip sign
       if continuous or isinstance(sde, sde_lib.subVPSDE):
@@ -187,7 +161,7 @@ def get_score_fn(sde, model, params, states, train=False, continuous=False, retu
       else:
         return score
 
-  elif isinstance(sde, sde_lib.VESDE):
+  elif isinstance(sde, VE):
     def score_fn(x, t, rng=None):
       if continuous:
         labels = sde.marginal_prob(jnp.zeros_like(x), t)[1]

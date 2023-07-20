@@ -10,7 +10,7 @@ from diffusionjax.losses import get_loss, errors
 import optax
 
 
-def get_optimizer(config):
+def get_optimizerSS(config):
     """Returns an optax optimizer object based on `config`."""
     if config.optim.optimizer == 'Adam':
         if config.optim.weight_decay:
@@ -26,7 +26,7 @@ def get_optimizer(config):
     return optimizer
 
 
-def SSget_optimizer(config):
+def get_optimizer(config):
   """Returns a flax optimizer object based on `config`."""
   if config.optim.optimizer == 'Adam':
     optimizer = flax.optim.Adam(beta1=config.optim.beta1, eps=config.optim.eps,
