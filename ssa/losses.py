@@ -7,23 +7,23 @@ from ssa.models import utils as mutils
 from diffusionjax.sde import VE, VP
 from diffusionjax.utils import batch_mul, get_score
 from diffusionjax.losses import get_loss, errors
-import optax
+# import optax
 
 
-def get_optimizerSS(config):
-    """Returns an optax optimizer object based on `config`."""
-    if config.optim.optimizer == 'Adam':
-        if config.optim.weight_decay:
-            optimizer = optax.adamw(
-                config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
-        else:
-            optimizer = optax.adam(
-                config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
-    else:
-        raise NotImplementedError(
-            'Optimiser {} not supported yet!'.format(config.optim.optimizer)
-        )
-    return optimizer
+# def get_optimizerSS(config):
+#     """Returns an optax optimizer object based on `config`."""
+#     if config.optim.optimizer == 'Adam':
+#         if config.optim.weight_decay:
+#             optimizer = optax.adamw(
+#                 config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
+#         else:
+#             optimizer = optax.adam(
+#                 config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
+#     else:
+#         raise NotImplementedError(
+#             'Optimiser {} not supported yet!'.format(config.optim.optimizer)
+#         )
+#     return optimizer
 
 
 def get_optimizer(config):

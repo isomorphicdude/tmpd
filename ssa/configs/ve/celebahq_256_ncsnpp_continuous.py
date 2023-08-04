@@ -32,12 +32,16 @@ def get_config():
   sampling.predictor = 'reverse_diffusion'
   sampling.corrector = 'langevin'
 
+  # TODO: BB added this since only one checkpoint is given
+  evaluate = config.eval
+  evaluate.begin_ckpt = 48
+  evaluate.end_ckpt = 48
+
   # data
   data = config.data
   data.dataset = 'CelebAHQ'
   data.image_size = 256
   data.tfrecords_path = '/home/yangsong/ncsc/celebahq/r08.tfrecords'
-
 
   # model
   model = config.model

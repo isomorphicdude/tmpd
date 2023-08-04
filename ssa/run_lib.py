@@ -33,6 +33,7 @@ FLAGS = flags.FLAGS
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.samplers import get_sampler
+from grfjax.samplers import get_cs_sampler
 
 import matplotlib.pyplot as plt
 
@@ -55,10 +56,240 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     plt.close()
 
 
+def inverse_problem(config, workdir, eval_folder="eval"):
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    sampling_eps = 1e-3
+  elif config.training.sde.lower() == 'subvpsde':
+    # sampling_eps = 1e-3
+    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    sampling_eps = 1e-5
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  input_shape = (
+    num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+  x_0 = jax.random.normal(rng, input_shape)
+  t_0 = 0.999 * jnp.ones((1,))
+
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+
+  begin_ckpt = config.eval.begin_ckpt
+
+  logging.info("begin checkpoint: %d" % (begin_ckpt,))
+  print("begin checkpoint: {}".format(begin_ckpt))
+  print("end checkpoint: {}".format(config.eval.end_ckpt))
+
+  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
+    # Wait if the target checkpoint doesn't exist yet
+    waiting_message_printed = False
+    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+
+    if not tf.io.gfile.exists(ckpt_filename):
+      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+
+    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+    score_fn = mutils.get_score_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+
+    # is score fn a vectorized function? yes
+
+    rsde = sde.reverse(score_fn)
+    drift, diffusion = rsde.sde(x_0, t_0)
+    print(drift.shape)
+    print(diffusion.shape)
+    print(drift[0, 0, 0, 0])
+    print(drift[-1, -1, -1, -1])
+    print(jnp.sum(drift))
+    print(diffusion[0])
+
+    sampler = get_sampler(
+      (1, config.data.image_size, config.data.image_size, config.data.num_channels),
+      EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
+    q_samples, num_function_evaluations = sampler(rng)
+    print("num_function_evaluations", num_function_evaluations)
+    q_samples = inverse_scaler(q_samples)
+    print(q_samples.shape)
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="samples empirical score")
+
+    mask = True
+    if mask is not None:
+      mask = jax.random.randint(rng, (config.data.image_size, config.data.image_size), 0, 2)
+      mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
+      print(mask)
+      y = q_samples[0]
+  
+    plot_samples(
+      jnp.expand_dims(y * mask, axis=0),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="observed data")
+  
+    H = None
+    observation_map = None
+    batch_size = config.eval.batch_size
+    print("\nbatch_size={}".format(batch_size))
+    sampling_shape = (
+      4//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+    # TODO: This syntax is likely to change, and probably remove stack_samples
+    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, config.sampling.inverse_scaler,
+      y, H, mask, observation_map, stack_samples=False)
+    pmap = False
+    if pmap: sampler = jax.pmap(sampler, axis_name='batch')
+
+    q_samples, nfe = sampler(rng)
+    print(q_samples.shape)
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="samples empirical score")
+    assert 0
+
+
+def sample(config,
+          workdir,
+          eval_folder="eval"):
+  """Sample trained models.
+
+  Args:
+    config: Configuration to use.
+    workdir: Working directory for checkpoints.
+    eval_folder: The subfolder for storing evaluation results. Default to
+      "eval".
+  """
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    sampling_eps = 1e-3
+  elif config.training.sde.lower() == 'subvpsde':
+    # sampling_eps = 1e-3
+    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    sampling_eps = 1e-5
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  input_shape = (
+    num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+  x_0 = jax.random.normal(rng, input_shape)
+  t_0 = 0.999 * jnp.ones((1,))
+
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+
+  begin_ckpt = config.eval.begin_ckpt
+
+  logging.info("begin checkpoint: %d" % (begin_ckpt,))
+  print("begin checkpoint: {}".format(begin_ckpt))
+  print("end checkpoint: {}".format(config.eval.end_ckpt))
+
+  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
+    # Wait if the target checkpoint doesn't exist yet
+    waiting_message_printed = False
+    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+
+    if not tf.io.gfile.exists(ckpt_filename):
+      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+
+    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+    score_fn = mutils.get_score_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+
+    # is score fn a vectorized function? yes
+
+    rsde = sde.reverse(score_fn)
+    drift, diffusion = rsde.sde(x_0, t_0)
+    print(drift.shape)
+    print(diffusion.shape)
+    print(drift[0, 0, 0, 0])
+    print(drift[-1, -1, -1, -1])
+    print(jnp.sum(drift))
+    print(diffusion[0])
+
+    sampler = get_sampler(
+      (1, config.data.image_size, config.data.image_size, config.data.num_channels),
+      EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
+    q_samples, num_function_evaluations = sampler(rng)
+    print("num_function_evaluations", num_function_evaluations)
+    q_samples = inverse_scaler(q_samples)
+    print(q_samples.shape)
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="samples empirical score")
+    assert 0
+
+
 def evaluate(config,
              workdir,
              eval_folder="eval"):
   """Evaluate trained models.
+
+  Evalates the sample quality and likelihoods of existing models. Dumps samples, quantitative
+  results. Can do a combination of the following:
+  - Evalate the loss function on the test/validation set.
+  - Generate a fixed number of samples and compute its Inception score, FID or KID. Prior to
+    evaluation, stats files must have been already downloaded/computed and stored in assets/stats.
+  - Compute the log-likelihood on the training or test dataset.
 
   Args:
     config: Configuration to use.
@@ -196,37 +427,38 @@ def evaluate(config,
   logging.info("begin checkpoint: %d" % (begin_ckpt,))
   print("begin checkpoint: {}".format(begin_ckpt))
   print("end checkpoint: {}".format(config.eval.end_ckpt))
+
+
   for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
     # Wait if the target checkpoint doesn't exist yet
     waiting_message_printed = False
     ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
-    # print(ckpt_filename)
-    # print(tf.io.gfile.exists(ckpt_filename))
-    # state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-    while not tf.io.gfile.exists(ckpt_filename):
-      if not waiting_message_printed and jax.host_id() == 0:
-        logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
-        print("Waiting for the arrival of checkpoint_%d" % (ckpt,))
-        print(tf.io.gfile.exists(ckpt_filename))
-        waiting_message_printed = True
-      time.sleep(60)
 
-    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-    # state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
-    # Wait for 2 additional mins in case the file exists but is not ready for reading
+    if not tf.io.gfile.exists(ckpt_filename):
+      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+
+    # TODO: removed this waiting code, not sure why it should be necessary
+    # while not tf.io.gfile.exists(ckpt_filename):
+    #   if not waiting_message_printed and jax.host_id() == 0:
+    #     logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
+    #     waiting_message_printed = True
+    #   time.sleep(60)
+
+    # # Wait for 2 additional mins in case the file exists but is not ready for reading
     # try:
-    #   state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
-    # except Exception as err:
-    #   raise err
-    #   assert 0
-    #   # time.sleep(60)
+    #   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+    # except:
+    #   time.sleep(60)
     #   try:
-    #     state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
+    #     state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
     #   except:
     #     time.sleep(120)
-    #     state = checkpoints.restore_checkpoint(checkpoint_dir, target=None, step=ckpt)
+    #     state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    score_fn = mutils.get_score_fn(sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+    score_fn = mutils.get_score_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
     rsde = sde.reverse(score_fn)
     drift, diffusion = rsde.sde(x_0, t_0)
     print(drift.shape)
@@ -236,43 +468,37 @@ def evaluate(config,
     print(jnp.sum(drift))
     print(diffusion[0])
 
-    sampler = get_sampler((4, config.data.image_size, config.data.image_size, config.data.num_channels), EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
+    sampler = get_sampler(
+      (1, config.data.image_size, config.data.image_size, config.data.num_channels),
+      EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
     q_samples, num_function_evaluations = sampler(rng)
-    print(num_function_evaluations)
-    print(q_samples.shape)
+    print("num_function_evaluations", num_function_evaluations)
     q_samples = inverse_scaler(q_samples)
     print(q_samples.shape)
-    # q_samples = q_samples.transpose(0, 2, 1, 3)
-    # print(q_samples.shape)
-    plot_samples(q_samples, image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples empirical score")
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="samples empirical score")
     assert 0
 
-    state = mutils.State(step=state['step'],
-                        optimizer=state['optimizer'],
-                        lr=state['lr'],
-                        model_state=state['optimizer'],
-                        ema_rate=state['ema_rate'],
-                        params_ema=state['params_ema'],
-                        rng=state['rng'])  # pytype: disable=wrong-keyword-args
+    # #### Don't do parallel stuff and see what happens
+    # eval_iter = iter(eval_ds)
+    # for i, batch in enumerate(eval_iter):
+    #   batch['image'] = batch['image'][0][0]
+    #   batch['label'] = batch['label'][0][0]
+    #   print(batch['image'].shape, "batch image shape")
+    #   print(batch['label'].shape, "batch label shape")
 
-      # #### Don't do parallel stuff and see what happens
-      # eval_iter = iter(eval_ds)
-      # for i, batch in enumerate(eval_iter):
-      #   batch['image'] = batch['image'][0][0]
-      #   batch['label'] = batch['label'][0][0]
-      #   print(batch['image'].shape, "batch image shape")
-      #   print(batch['label'].shape, "batch label shape")
+    #   rng, next_rng = jax.random.split(rng)
+    #   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+    #   (_, _), eval_loss = eval_step((next_rng, state), eval_batch['image'])
+    #   print(eval_loss)
+    #   assert 0
 
-      #   rng, next_rng = jax.random.split(rng)
-      #   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
-      #   (_, _), eval_loss = eval_step((next_rng, state), eval_batch['image'])
-      #   print(eval_loss)
-      #   assert 0
-
-    #### Don't do parallel stuff and see what happens
     # Replicate the training state for executing on multiple devices
+    # TODO: parallel stuff not compatible with newer jax: use score_sde env rather than ssa env
     pstate = flax.jax_utils.replicate(state)
-
     # Compute the loss function on the full evaluation dataset if loss computation is enabled
     if config.eval.enable_loss:
       all_losses = []

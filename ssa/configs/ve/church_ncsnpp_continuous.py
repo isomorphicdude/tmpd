@@ -14,9 +14,9 @@
 # limitations under the License.
 
 # Lint as: python3
-"""Training NCSN++ on CIFAR-10 with VE SDE."""
+"""Training NCSN++ on Church with VE SDE."""
 
-from configs.default_cifar10_configs import get_default_configs
+from configs.default_lsun_configs import get_default_configs
 
 
 def get_config():
@@ -25,7 +25,6 @@ def get_config():
   training = config.training
   training.sde = 'vesde'
   training.continuous = True
-  training.n_iters = 950001
 
   # sampling
   sampling = config.sampling
@@ -36,20 +35,24 @@ def get_config():
   # TODO: BB added this since only one checkpoint is given
   # evaluation
   evaluate = config.eval
-  evaluate.begin_ckpt = 12
-  evaluate.end_ckpt = 12
+  evaluate.begin_ckpt = 126
+  evaluate.end_ckpt = 126
+
+  # data
+  data = config.data
+  data.category = 'church_outdoor'
 
   # model
   model = config.model
   model.name = 'ncsnpp'
-  model.fourier_scale = 16
+  model.sigma_max = 380
   model.scale_by_sigma = True
   model.ema_rate = 0.999
   model.normalization = 'GroupNorm'
   model.nonlinearity = 'swish'
   model.nf = 128
-  model.ch_mult = (1, 2, 2, 2)
-  model.num_res_blocks = 8
+  model.ch_mult = (1, 1, 2, 2, 2, 2, 2)
+  model.num_res_blocks = 2
   model.attn_resolutions = (16,)
   model.resamp_with_conv = True
   model.conditional = True
@@ -57,33 +60,12 @@ def get_config():
   model.fir_kernel = [1, 3, 3, 1]
   model.skip_rescale = True
   model.resblock_type = 'biggan'
-  model.progressive = 'none'
-  model.progressive_input = 'residual'
+  model.progressive = 'output_skip'
+  model.progressive_input = 'input_skip'
   model.progressive_combine = 'sum'
   model.attention_type = 'ddpm'
-  model.init_scale = 0.0
+  model.init_scale = 0.
+  model.fourier_scale = 16
   model.conv_size = 3
-
-  # eval
-  eval = config.eval
-  eval.batch_size = 1
-
-  # sampling
-  sampling = config.sampling
-  sampling.cs_method = 'boys2023a'
-  sampling.noise_std = 0.01
-  sampling.denoise = True  # work out what denoise_override is
-  sampling.innovation = True  # this will probably be superceded
-  sampling.inverse_scaler = None
-
-  # solver
-  solver = config.solver
-  solver.num_outer_steps = 1000
-  # solver.outer_solver = 'euler_maruyama'
-  # solver.inner_solver = None
-
-  # optim
-  config.seed = 2023
-
 
   return config
