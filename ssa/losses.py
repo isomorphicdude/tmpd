@@ -7,23 +7,6 @@ from ssa.models import utils as mutils
 from diffusionjax.sde import VE, VP
 from diffusionjax.utils import batch_mul, get_score
 from diffusionjax.losses import get_loss, errors
-# import optax
-
-
-# def get_optimizerSS(config):
-#     """Returns an optax optimizer object based on `config`."""
-#     if config.optim.optimizer == 'Adam':
-#         if config.optim.weight_decay:
-#             optimizer = optax.adamw(
-#                 config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
-#         else:
-#             optimizer = optax.adam(
-#                 config.optim.lr, b1=config.optim.beta1, eps=config.optim.eps)
-#     else:
-#         raise NotImplementedError(
-#             'Optimiser {} not supported yet!'.format(config.optim.optimizer)
-#         )
-#     return optimizer
 
 
 def get_optimizer(config):
@@ -46,7 +29,6 @@ def optimization_manager(config):
                   warmup=config.optim.warmup,
                   grad_clip=config.optim.grad_clip):
     """Optimizes with warmup and gradient clipping (disabled if negative)."""
-    assert 0
     lr = state.lr
     if warmup > 0:
       lr = lr * jnp.minimum(state.step / warmup, 1.0)
@@ -62,60 +44,6 @@ def optimization_manager(config):
     return state.optimizer.apply_gradient(clipped_grad, learning_rate=lr)
 
   return optimize_fn
-
-
-def get_score(sde, model, params, states, score_scaling=True, train=False):
-  """Create a function to give the output of the score-based model.
-
-  Args:
-    model: A `flax.linen.Module` object the represent the architecture of score-based model.
-    params: A dictionary that contains all trainable parameters.
-    states: A dictionary that contains all mutable states.
-    train: `True` for training and `False` for evaluation.
-
-  Returns:
-    A model function.
-  """
-
-  def score(x, labels, rng=None):
-    """Compute the output of the score-based model.
-
-    Args:
-      x: A mini-batch of input data.
-      labels: A mini-batch of conditioning variables for time steps. Should be interpreted differently
-        for different models.
-      rng: If present, it is the random state for dropout
-
-    Returns:
-      A tuple of (model output, new mutable states)
-    """
-    # states is a dictionary that contains all mutable states: it contains the keys state, target
-    # params is a dictionary?
-    variables = {'params': params, **states}
-    if not train:
-      # for i in params: print(i)
-      # for i in params['ResnetBlockBigGANpp_0']['GroupNorm_0']: print(i)
-      print(x.shape, "input_shape")
-      print(labels.shape, "label_shape")
-      print(params['ResnetBlockBigGANpp_0']['GroupNorm_0']['scale'].shape, "scale shape of params")
-      print(params['ResnetBlockBigGANpp_0']['GroupNorm_0']['bias'].shape, "bias shape of params")
-
-      model_eval = model.apply(variables, x, labels, train=False, mutable=False)
-      # model_eval = model.apply(variables, x, labels, train=False, mutable=False), states
-    else:
-      rngs = {'dropout': rng}
-      model_eval = model.apply(variables, x, labels, train=True, mutable=list(states.keys()), rngs=rngs)
-
-    if score_scaling is True:
-      return lambda x, t: -batch_mul(model_eval, 1. / sde.marginal_prob(x, t)[1])
-    else:
-      return lambda x, t: -model_eval
-      # if states:
-      #   return outputs
-      # else:
-      #   return outputs, states
-
-  return score
 
 
 def get_loss(sde, solver, model, score_scaling=True, likelihood_weighting=True, reduce_mean=True, pointwise_t=False):
