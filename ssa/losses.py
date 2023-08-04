@@ -46,56 +46,6 @@ def optimization_manager(config):
   return optimize_fn
 
 
-def get_loss(sde, solver, model, score_scaling=True, likelihood_weighting=True, reduce_mean=True, pointwise_t=False):
-    """
-    Forked from diffusionjax to get the loss. NOTE: only tested for evaluation.
-    TODO: Parameter shapes seem a little different, so maybe need to go as far as possible replicating
-    get_sde_loss_fn
-
-    Create a loss function for score matching training.
-    Args:
-        sde: Instantiation of a valid SDE class.
-        solver: Instantiation of a valid Solver class.
-        model: A valid flax neural network `:class:flax.linen.Module` class.
-        score_scaling: Boolean variable, set to `True` if learning a score scaled by the marginal standard deviation.
-        likelihood_weighting: Boolean variable, set to `True` if likelihood weighting, as described in Song et al. 2020 (https://arxiv.org/abs/2011.13456), is applied.
-        reduce_mean: Boolean variable, set to `True` if taking the mean of the errors in the loss, set to `False` if taking the sum.
-        pointwise_t: Boolean variable, set to `True` if returning a function that can evaluate the loss pointwise over time. Set to `False` if returns an expectation of the loss over time.
-
-    Returns:
-        A loss function that can be used for score matching training.
-    """
-    reduce_op = jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
-    if pointwise_t:
-        def loss(t, params, states, rng, data):
-            n_batch = data.shape[0]
-            ts = jnp.ones((n_batch,)) * t
-            score = get_score(sde, model, params, states, score_scaling, train=False)
-            e = errors(ts, sde, score, rng, data, likelihood_weighting)
-            losses = e**2
-            losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
-            if likelihood_weighting:
-                g2 = sde.sde(jnp.zeros_like(data), ts)[1]**2
-                losses = losses * g2
-            return jnp.mean(losses)
-    else:
-        def loss(params, states, rng, data):
-            rng, step_rng = random.split(rng)
-            n_batch = data.shape[0]
-            # which one is preferable?
-            # ts = random.randint(step_rng, (n_batch,), 1, solver.num_steps) / (solver.num_steps - 1)
-            ts = random.uniform(step_rng, (data.shape[0],), minval=1. / solver.num_steps, maxval=1.0)
-            score = get_score(sde, model, params, states, score_scaling, train=False)
-            e = errors(ts, sde, score, rng, data, likelihood_weighting)
-            losses = e**2
-            losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
-            if likelihood_weighting:
-                g2 = sde.sde(jnp.zeros_like(data), ts)[1]**2
-                losses = losses * g2
-            return jnp.mean(losses)
-    return loss
-
-
 # TODO: delete this probably not needed. What is the actual problem? check the shapes going in/out
 def get_loss_tmp(sde, model, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """Create a loss function for training with arbirary SDEs.
