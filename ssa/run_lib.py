@@ -32,7 +32,7 @@ FLAGS = flags.FLAGS
 
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
-from diffusionjax.samplers import get_sampler
+from diffusionjax.utils import get_sampler
 from grfjax.samplers import get_cs_sampler
 
 import matplotlib.pyplot as plt
@@ -176,13 +176,16 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname="samples empirical score")
+    
+
     assert 0
 
 
 def sample(config,
           workdir,
           eval_folder="eval"):
-  """Sample trained models.
+  """
+  Sample trained models using grfjax.
 
   Args:
     config: Configuration to use.
@@ -265,7 +268,7 @@ def sample(config,
     print(diffusion[0])
 
     sampler = get_sampler(
-      (1, config.data.image_size, config.data.image_size, config.data.num_channels),
+      (4, config.data.image_size, config.data.image_size, config.data.num_channels),
       EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
     q_samples, num_function_evaluations = sampler(rng)
     print("num_function_evaluations", num_function_evaluations)
@@ -351,7 +354,7 @@ def evaluate(config,
     continuous = config.training.continuous
     likelihood_weighting = config.training.likelihood_weighting
     reduce_mean = config.training.reduce_mean
-    eval_step = losses.get_step_fn(sde, EulerMaruyama(sde, num_steps=config.model.num_scales), score_model,
+    eval_step = losses.get_step_fn(sde, score_model,
                                    train=False, optimize_fn=optimize_fn,
                                    reduce_mean=reduce_mean,
                                    continuous=continuous, likelihood_weighting=likelihood_weighting)

@@ -1,9 +1,8 @@
 """Various sampling methods."""
 import functools
-from diffusionjax.samplers import get_sampler
+from diffusionjax.utils import get_sampler
 from diffusionjax.solvers import EulerMaruyama, Annealed
 from diffusionjax.sde import UDLangevin
-import diffusionjax.utils as multils
 
 
 _correctors = {}
