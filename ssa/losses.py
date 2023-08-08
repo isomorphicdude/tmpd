@@ -4,8 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 from ssa.models import utils as mutils
-from diffusionjax.utils import batch_mul
-from diffusionjax.losses import get_loss, errors
+from diffusionjax.utils import batch_mul, get_loss, errors
 
 
 def get_optimizer(config):
