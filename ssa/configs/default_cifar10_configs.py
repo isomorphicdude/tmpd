@@ -56,9 +56,6 @@ def get_default_configs():
   model.dropout = 0.1
   model.embedding_type = 'fourier'
 
-  # solver
-  config.solver = solver = ml_collections.ConfigDict()
-
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
   optim.weight_decay = 0
@@ -70,5 +67,9 @@ def get_default_configs():
   optim.grad_clip = 1.
 
   config.seed = 42
+
+  # TODO: BB stuff
+  # solver
+  config.solver = solver = ml_collections.ConfigDict()
 
   return config

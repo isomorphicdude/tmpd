@@ -32,11 +32,6 @@ def get_config():
   sampling.predictor = 'reverse_diffusion'
   sampling.corrector = 'langevin'
 
-  # TODO: BB added this since only one checkpoint is given
-  evaluate = config.eval
-  evaluate.begin_ckpt = 48
-  evaluate.end_ckpt = 48
-
   # data
   data = config.data
   data.dataset = 'CelebAHQ'
@@ -68,5 +63,25 @@ def get_config():
   model.init_scale = 0.
   model.fourier_scale = 16
   model.conv_size = 3
+
+  # TODO: BB stuff
+  model.num_scales = 1000  # TMP
+  sampling.cs_method = 'Song2023'
+  # sampling.cs_method = 'ApproxProjectionKalmanFilter'
+  # sampling.cs_method = 'ProjectionKalmanFilter'
+  # sampling.cs_method = 'Boys2023b'
+  sampling.noise_std = 0.001
+  sampling.denoise = True  # work out what denoise_override is
+  sampling.innovation = True  # this will probably be superceded
+  sampling.inverse_scaler = None
+  # TODO: BB added this since only one checkpoint is given
+  evaluate = config.eval
+  evaluate.begin_ckpt = 48
+  evaluate.end_ckpt = 48
+  evaluate.batch_size = 1
+  solver = config.solver
+  solver.num_outer_steps = config.model.num_scales
+  # solver.outer_solver = 'euler_maruyama'
+  # solver.inner_solver = None
 
   return config

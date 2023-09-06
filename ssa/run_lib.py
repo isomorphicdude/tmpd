@@ -57,6 +57,11 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
 
 
 def inverse_problem(config, workdir, eval_folder="eval"):
+  jax.default_device = jax.devices()[0]
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.training.pmap else 1
+
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
@@ -96,7 +101,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   input_shape = (
     num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
   x_0 = jax.random.normal(rng, input_shape)
-  t_0 = 0.999 * jnp.ones((1,))
+  t_0 = 0.999 * jnp.ones((num_devices,))
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
@@ -120,64 +125,113 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     score_fn = mutils.get_score_fn(
       sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-    # is score fn a vectorized function? yes
-
-    rsde = sde.reverse(score_fn)
-    drift, diffusion = rsde.sde(x_0, t_0)
-    print(drift.shape)
-    print(diffusion.shape)
-    print(drift[0, 0, 0, 0])
-    print(drift[-1, -1, -1, -1])
-    print(jnp.sum(drift))
-    print(diffusion[0])
-
-    sampler = get_sampler(
-      (1, config.data.image_size, config.data.image_size, config.data.num_channels),
-      EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
-    q_samples, num_function_evaluations = sampler(rng)
-    print("num_function_evaluations", num_function_evaluations)
-    q_samples = inverse_scaler(q_samples)
-    print(q_samples.shape)
-    plot_samples(
-      q_samples,
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="samples empirical score")
-
-    mask = True
-    if mask is not None:
-      mask = jax.random.randint(rng, (config.data.image_size, config.data.image_size), 0, 2)
-      mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
-      print(mask)
-      y = q_samples[0]
-  
-    plot_samples(
-      jnp.expand_dims(y * mask, axis=0),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="observed data")
-  
-    H = None
-    observation_map = None
     batch_size = config.eval.batch_size
     print("\nbatch_size={}".format(batch_size))
     sampling_shape = (
-      4//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
-    # TODO: This syntax is likely to change, and probably remove stack_samples
-    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, config.sampling.inverse_scaler,
-      y, H, mask, observation_map, stack_samples=False)
-    pmap = False
-    if pmap: sampler = jax.pmap(sampler, axis_name='batch')
+      config.eval.batch_size//num_devices,
+      config.data.image_size, config.data.image_size, config.data.num_channels)
+    print("sampling shape", sampling_shape)
+  
+    rsde = sde.reverse(score_fn)
+    # drift, diffusion = rsde.sde(x_0, t_0)
 
-    q_samples, nfe = sampler(rng)
+    outer_solver = EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales)
+    sampler = get_sampler(
+      sampling_shape,
+      outer_solver, inverse_scaler=inverse_scaler)
+
+    if config.training.pmap:
+      sampler = jax.pmap(sampler, axis_name='batch')
+      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      sample_rng = jnp.asarray(sample_rng)
+    else:
+      rng, sample_rng = jax.random.split(rng, 2)
+
+    q_samples, num_function_evaluations = sampler(sample_rng)
+    print("num_function_evaluations", num_function_evaluations)
     print(q_samples.shape)
+
+    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+    print(q_samples.shape)
+  
     plot_samples(
       q_samples,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="samples empirical score")
-    
+      fname="ground truth")
+    x = q_samples[0].flatten()
 
+    # num_obs = int(config.data.image_size**2 / 16)
+    num_obs = int(config.data.image_size)
+    idx_obs = jax.random.choice(
+      rng, config.data.image_size**2, shape=(num_obs,), replace=False)
+    mask = jnp.zeros((config.data.image_size**2,), dtype=int)
+    mask = mask.at[idx_obs].set(1)
+    mask = mask.reshape((config.data.image_size, config.data.image_size))
+    mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
+    num_obs = num_obs * 3  # because of tile
+  
+    mask = mask.flatten()
+    idx_obs = np.nonzero(mask)[0]
+    H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
+    ogrid = np.arange(num_obs, dtype=int)
+    H = H.at[ogrid, idx_obs].set(1.0)
+    # A = jax.random.normal(rng, (H.shape[1], H.shape[1]))
+    # print(H.shape)
+    # print(A)
+    # print(H @ A @ H.T)
+
+    def observation_map(x, t):
+        return H @ x
+
+    def adjoint_observation_map(y, t):
+        return H.T @ y
+
+    # HTy = adjoint_observation_map(y_data, 0)
+    # print(HTy.shape)
+    # x = HTy.reshape((1, config.data.image_size, config.data.image_size, config.data.num_channels))
+    # plot_samples(
+    #   y,
+    #   image_size=config.data.image_size,
+    #   num_channels=config.data.num_channels,
+    #   fname="adjoint map")
+
+    y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+    y = y * mask
+    y_data = y.copy()
+    # TODO: Do I need to use inverse scaler before adding the noise?
+    plot_samples(
+      jnp.expand_dims(y, axis=0),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="observed data")
+
+    if 0:
+      y = H @ x + jax.random.normal(rng, idx_obs.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+      y_data = y.copy()
+      # can get indices from a flat mask
+      mask = None
+  
+    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, config.sampling.inverse_scaler,
+      y_data, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+
+    if config.training.pmap:
+      sampler = jax.pmap(sampler, axis_name='batch')
+      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      sample_rng = jnp.asarray(sample_rng)
+    else:
+      rng, sample_rng = jax.random.split(rng, 2)
+
+    q_samples, nfe = sampler(sample_rng)
+    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+    print(q_samples.shape)
+    q_samples = inverse_scaler(q_samples)
+    print(q_samples)
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="samples {}".format(config.sampling.cs_method.lower()))
     assert 0
 
 
@@ -475,7 +529,7 @@ def evaluate(config,
       (1, config.data.image_size, config.data.image_size, config.data.num_channels),
       EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
     q_samples, num_function_evaluations = sampler(rng)
-    print("num_function_evaluations", num_function_evaluations)
+    print("num_function_evaluations", num_function_evaluations, "sampler {}".format(config.sampling.cs_method))
     q_samples = inverse_scaler(q_samples)
     print(q_samples.shape)
     plot_samples(
