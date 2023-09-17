@@ -63,4 +63,24 @@ def get_config():
   model.fourier_scale = 16
   model.conv_size = 3
 
+  # TODO BB stuff
+  # optim
+  config.seed = 2023
+
+  sampling.noise_std = 0.001
+  sampling.denoise = True  # work out what denoise_override is
+  sampling.innovation = True  # this will probably be superceded
+  sampling.inverse_scaler = None
+  evaluate = config.eval
+  evaluate.begin_ckpt = 8  # 12
+  evaluate.end_ckpt = 8  # 12
+  evaluate.batch_size = 1
+  evaluate.pmap = False
+  solver = config.solver
+  # solver.outer_solver = 'eulermaruyama'
+  # solver.inner_solver = None
+  solver.outer_solver = 'DDIMVP'
+  solver.num_outer_steps = model.num_scales
+  solver.eta = 0.4  # DDIM hyperparameter
+
   return config

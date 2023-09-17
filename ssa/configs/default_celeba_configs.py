@@ -71,5 +71,11 @@ def get_default_configs():
   # TODO: BB stuff
   # solver
   config.solver = solver = ml_collections.ConfigDict()
+  solver.outer_solver = 'eulermaruyama'
+  solver.inner_solver = None
+  solver.dt = None
+  solver.epsilon = None
+  solver.num_outer_steps = model.num_scales
+  solver.eta = None  # DDIM hyperparameter
 
   return config

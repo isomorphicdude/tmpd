@@ -33,7 +33,10 @@ FLAGS = flags.FLAGS
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.utils import get_sampler
+from diffusionjax.run_lib import get_solver
 from grfjax.samplers import get_cs_sampler
+from grfjax.inpainting import get_mask
+from grfjax.utils import get_markov_chain, get_ddim_chain
 
 import matplotlib.pyplot as plt
 
@@ -60,7 +63,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   jax.default_device = jax.devices()[0]
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
   # ... they must be all the same model of device for pmap to work
-  num_devices =  int(jax.local_device_count()) if config.training.pmap else 1
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
 
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
@@ -124,6 +127,8 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     score_fn = mutils.get_score_fn(
       sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    epsilon_fn = mutils.get_epsilon_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
     batch_size = config.eval.batch_size
     print("\nbatch_size={}".format(batch_size))
@@ -135,12 +140,16 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     rsde = sde.reverse(score_fn)
     # drift, diffusion = rsde.sde(x_0, t_0)
 
-    outer_solver = EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales)
+    # outer_solver = EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales)
+    # outer_solver, inner_solver = get_solver(config, sde, score_fn)
+    # outer_solver = get_markov_chain(config, score_fn)
+    outer_solver = get_ddim_chain(config, epsilon_fn)
+
     sampler = get_sampler(
       sampling_shape,
-      outer_solver, inverse_scaler=inverse_scaler)
+      outer_solver, inverse_scaler=None)
 
-    if config.training.pmap:
+    if config.eval.pmap:
       sampler = jax.pmap(sampler, axis_name='batch')
       rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
       sample_rng = jnp.asarray(sample_rng)
@@ -149,73 +158,82 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     q_samples, num_function_evaluations = sampler(sample_rng)
     print("num_function_evaluations", num_function_evaluations)
-    print(q_samples.shape)
-
+    print("sampling shape", q_samples.shape)
+    print(q_samples)
     q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-    print(q_samples.shape)
+    print("sampling shape", q_samples.shape)
   
     plot_samples(
       q_samples,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
+      fname="prior samples")
+
+    plot_samples(
+      q_samples[0],
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
       fname="ground truth")
     x = q_samples[0].flatten()
+    assert 0
 
     # num_obs = int(config.data.image_size**2 / 16)
-    num_obs = int(config.data.image_size)
-    idx_obs = jax.random.choice(
-      rng, config.data.image_size**2, shape=(num_obs,), replace=False)
-    mask = jnp.zeros((config.data.image_size**2,), dtype=int)
-    mask = mask.at[idx_obs].set(1)
-    mask = mask.reshape((config.data.image_size, config.data.image_size))
-    mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
-    num_obs = num_obs * 3  # because of tile
-  
-    mask = mask.flatten()
-    idx_obs = np.nonzero(mask)[0]
-    H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
-    ogrid = np.arange(num_obs, dtype=int)
-    H = H.at[ogrid, idx_obs].set(1.0)
-    # A = jax.random.normal(rng, (H.shape[1], H.shape[1]))
-    # print(H.shape)
-    # print(A)
-    # print(H @ A @ H.T)
-
-    def observation_map(x, t):
-        return H @ x
-
-    def adjoint_observation_map(y, t):
-        return H.T @ y
-
-    # HTy = adjoint_observation_map(y_data, 0)
-    # print(HTy.shape)
-    # x = HTy.reshape((1, config.data.image_size, config.data.image_size, config.data.num_channels))
-    # plot_samples(
-    #   y,
-    #   image_size=config.data.image_size,
-    #   num_channels=config.data.num_channels,
-    #   fname="adjoint map")
+    if 0:
+      num_obs = int(config.data.image_size)
+      idx_obs = jax.random.choice(
+        rng, config.data.image_size**2, shape=(num_obs,), replace=False)
+      mask = jnp.zeros((config.data.image_size**2,), dtype=int)
+      mask = mask.at[idx_obs].set(1)
+      mask = mask.reshape((config.data.image_size, config.data.image_size))
+      mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
+      num_obs = num_obs * 3  # because of tile
+      mask = mask.flatten()
+    elif 1:
+      # mask_name = 'square'
+      mask_name = 'half'
+      # mask_name = 'inverse_square'
+      # mask_name = 'lorem3'
+      mask, num_obs = get_mask(config.data.image_size, mask_name)
+      print("mask width = ", jnp.sqrt(num_obs / 3))
 
     y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
     y = y * mask
-    y_data = y.copy()
-    # TODO: Do I need to use inverse scaler before adding the noise?
-    plot_samples(
-      jnp.expand_dims(y, axis=0),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="observed data")
+    H = None
+    observation_map = None
+    adjoint_observation_map = None
 
-    if 0:
-      y = H @ x + jax.random.normal(rng, idx_obs.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+    if 'plus' not in config.sampling.cs_method:
+      logging.warning(
+        "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
+          (num_obs, config.data.image_size**2 * config.data.num_channels)))
+      idx_obs = np.nonzero(mask)[0]
+      H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
+      ogrid = np.arange(num_obs, dtype=int)
+      H = H.at[ogrid, idx_obs].set(1.0)
+      def observation_map(x, t):
+          return H @ x
+
+      def adjoint_observation_map(y, t):
+          return H.T @ y
+
+      y = H @ y
       y_data = y.copy()
       # can get indices from a flat mask
       mask = None
-  
-    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, config.sampling.inverse_scaler,
-      y_data, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+ 
+    print("y ", y)
+    y_data = inverse_scaler(y.copy())
+    print("y_data ", y_data)
+    plot_samples(
+      jnp.expand_dims(y_data, axis=0),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="observed data")
+ 
+    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+      y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
 
-    if config.training.pmap:
+    if config.eval.pmap:
       sampler = jax.pmap(sampler, axis_name='batch')
       rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
       sample_rng = jnp.asarray(sample_rng)
@@ -224,9 +242,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     q_samples, nfe = sampler(sample_rng)
     q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-    print(q_samples.shape)
-    q_samples = inverse_scaler(q_samples)
-    print(q_samples)
+    print("q_samples ",q_samples)
     plot_samples(
       q_samples,
       image_size=config.data.image_size,

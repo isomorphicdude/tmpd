@@ -122,6 +122,70 @@ def get_model_fn(model, params, states, train=False):
   return model_fn
 
 
+def get_epsilon_fn(sde, model, params, states, train=False, continuous=False, return_state=False):
+  """Wraps `epsilon_fn` so that the model output corresponds to a real time-dependent epsilon function.
+
+  Args:
+    sde: An `sde_lib.SDE` object that represents the forward SDE.
+    model: A `flax.linen.Module` object that represents the architecture of the score-based model.
+    params: A dictionary that contains all trainable parameters.
+    states: A dictionary that contains all other mutable parameters.
+    train: `True` for training and `False` for evaluation.
+    continuous: If `True`, the score-based model is expected to directly take continuous time steps.
+    return_state: If `True`, return the new mutable states alongside the model output.
+
+  Returns:
+    An epsilon function.
+  """
+  model_fn = get_model_fn(model, params, states, train=train)
+
+  if isinstance(sde, VP):
+    def epsilon_fn(x, t, rng=None):
+      # Scale neural network output by standard deviation and flip sign
+      if continuous or isinstance(sde, sde_lib.subVPSDE):
+        # For VP-trained models, t=0 corresponds to the lowest noise level
+        # The maximum value of time embedding is assumed to 999 for
+        # continuously-trained models.
+        labels = t * 999
+        model, state = model_fn(x, labels, rng)
+      else:
+        # For VP-trained models, t=0 corresponds to the lowest noise level
+        labels = t * (sde.N - 1)
+        model, state = model_fn(x, labels, rng)
+
+      epsilon = model
+      
+      if return_state:
+        return epsilon, state
+      else:
+        return epsilon
+
+  elif isinstance(sde, VE):
+    def epsilon_fn(x, t, rng=None):
+      if continuous:
+        labels = sde.marginal_prob(jnp.zeros_like(x), t)[1]
+        std = sde.marginal_prob(jnp.zeros_like(x), t)[1]
+      else:
+        # For VE-trained models, t=0 corresponds to the highest noise level
+        labels = sde.T - t
+        labels *= sde.N - 1
+        labels = jnp.round(labels).astype(jnp.int32)
+        std = sde.discrete_sigmas[labels.astype(jnp.int32)]
+
+      # TODO: check this
+      model, state = model_fn(x, labels, rng)
+      epsilon = batch_mul(-std, model)
+      if return_state:
+        return epsilon, state
+      else:
+        return epsilon
+
+  else:
+    raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
+
+  return epsilon_fn
+
+
 def get_score_fn(sde, model, params, states, train=False, continuous=False, return_state=False):
   """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
 
