@@ -238,8 +238,9 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus']
-    markov_methods = ['KPDDIM', 'KPDDIMplus', 'KPSMLD', 'KPSMLDplus']
+    ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
+      'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
+    markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
     if cs_method in ddim_methods:
       sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
         y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)

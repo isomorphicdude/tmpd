@@ -76,8 +76,7 @@ def get_config():
   # sampling.cs_method = 'Chung2022'  # Unstable for CIFAR10
   # sampling.cs_method = 'ProjectionKalmanFilter'
   # sampling.cs_method = 'KPDDPM'
-  # sampling.cs_method = 'KPSMLD'
-  sampling.cs_method = 'PiGDMVP'
+  # sampling.cs_method = 'KGDMVP'
 
   # mask methods
   # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
@@ -89,6 +88,7 @@ def get_config():
   # sampling.cs_method = 'KPDDPMplus'
   # sampling.cs_method = 'KPSMLDplus'
   # sampling.cs_method = 'PiGDMVPplus'
+  sampling.cs_method = 'KGDMVPplus'
 
   sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is
