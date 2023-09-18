@@ -125,11 +125,25 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    score_fn = mutils.get_score_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-    epsilon_fn = mutils.get_epsilon_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
+    unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
 
+    if config.solver.outer_solver in unconditional_ddim_methods:
+      epsilon_fn = mutils.get_epsilon_fn(
+        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+      outer_solver = get_ddim_chain(config, epsilon_fn)
+    elif config.solver.outer_solver in unconditional_markov_methods:
+      score_fn = mutils.get_score_fn(
+        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+      fn = score_fn
+      outer_solver = get_markov_chain(config, score_fn)
+    else:
+      score_fn = mutils.get_score_fn(
+        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+      # rsde = sde.reverse(score_fn)
+      # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
+      outer_solver, inner_solver = get_solver(config, sde, score_fn)
+ 
     batch_size = config.eval.batch_size
     print("\nbatch_size={}".format(batch_size))
     sampling_shape = (
@@ -137,13 +151,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       config.data.image_size, config.data.image_size, config.data.num_channels)
     print("sampling shape", sampling_shape)
   
-    rsde = sde.reverse(score_fn)
-    # drift, diffusion = rsde.sde(x_0, t_0)
-
-    # outer_solver = EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales)
-    # outer_solver, inner_solver = get_solver(config, sde, score_fn)
-    # outer_solver = get_markov_chain(config, score_fn)
-    outer_solver = get_ddim_chain(config, epsilon_fn)
 
     sampler = get_sampler(
       sampling_shape,
@@ -159,23 +166,23 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     q_samples, num_function_evaluations = sampler(sample_rng)
     print("num_function_evaluations", num_function_evaluations)
     print("sampling shape", q_samples.shape)
-    print(q_samples)
+    print("before inverse scaler ", q_samples)
+    q_images = inverse_scaler(q_samples.copy())
+    print("after inverse scaler ", q_images)
     q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-    print("sampling shape", q_samples.shape)
   
     plot_samples(
-      q_samples,
+      q_images,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname="prior samples")
 
     plot_samples(
-      q_samples[0],
+      q_images[0],
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname="ground truth")
     x = q_samples[0].flatten()
-    assert 0
 
     # num_obs = int(config.data.image_size**2 / 16)
     if 0:
@@ -202,6 +209,15 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     observation_map = None
     adjoint_observation_map = None
 
+    print("y ", y)
+    y_image = inverse_scaler(y.copy())
+    print("y_image ", y_image)
+    plot_samples(
+      jnp.expand_dims(y_image, axis=0),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname="observed data")
+
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
         "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
@@ -217,21 +233,22 @@ def inverse_problem(config, workdir, eval_folder="eval"):
           return H.T @ y
 
       y = H @ y
-      y_data = y.copy()
       # can get indices from a flat mask
       mask = None
- 
-    print("y ", y)
-    y_data = inverse_scaler(y.copy())
-    print("y_data ", y_data)
-    plot_samples(
-      jnp.expand_dims(y_data, axis=0),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="observed data")
- 
-    sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-      y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+
+    cs_method = config.sampling.cs_method
+
+    ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus']
+    markov_methods = ['KPDDIM', 'KPDDIMplus', 'KPSMLD', 'KPSMLDplus']
+    if cs_method in ddim_methods:
+      sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+    elif cs_method in markov_methods:
+      sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+    else:
+      sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
 
     if config.eval.pmap:
       sampler = jax.pmap(sampler, axis_name='batch')
