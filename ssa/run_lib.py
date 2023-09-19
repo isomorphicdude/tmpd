@@ -251,7 +251,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
         y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
 
     if config.eval.pmap:
-      sampler = jax.pmap(sampler, axis_name='batch')
+      # sampler = jax.pmap(sampler, axis_name='batch')
       rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
       sample_rng = jnp.asarray(sample_rng)
     else:
