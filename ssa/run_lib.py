@@ -33,10 +33,9 @@ FLAGS = flags.FLAGS
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.utils import get_sampler
-from diffusionjax.run_lib import get_solver
+from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from grfjax.samplers import get_cs_sampler
 from grfjax.inpainting import get_mask
-from grfjax.utils import get_markov_chain, get_ddim_chain
 
 import matplotlib.pyplot as plt
 
