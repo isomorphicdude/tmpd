@@ -68,7 +68,6 @@ def get_config():
   # sampling.cs_method = 'Song2023'  # OOM for CelebA but doesn't work (unstable) for CIFAR10
   # sampling.cs_method = 'Chung2022'  # Unstable for CIFAR10
   # sampling.cs_method = 'ProjectionKalmanFilter'
-  # sampling.cs_method = 'KPSMLD'
   # sampling.cs_method = 'PiGDMVE'
   # sampling.cs_method = 'KGDMVE'
   # sampling.cs_method = 'KPSMLD'
@@ -82,9 +81,9 @@ def get_config():
   # sampling.cs_method = 'chung2022scalarplus'  # Unstable pretty much always
   # sampling.cs_method = 'chung2022plus'  # Unstable, stable at std=10.0
   # sampling.cs_method = 'PiGDMVEplus'
-  sampling.cs_method = 'KGDMVEplus'
+  # sampling.cs_method = 'KGDMVEplus'
   # sampling.cs_method = 'KPSMLDplus'
-  # sampling.cs_method = 'DPSSMLDplus'
+  sampling.cs_method = 'DPSSMLDplus'
 
   sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is

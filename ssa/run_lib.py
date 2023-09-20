@@ -54,7 +54,8 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     plt.figure(figsize=(8,8))
     plt.axis('off')
     plt.imshow(img)
-    plt.savefig(fname)
+    plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
+    plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
     plt.close()
 
 
@@ -127,21 +128,18 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
     unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
 
+    epsilon_fn = mutils.get_epsilon_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    score_fn = mutils.get_score_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
     if config.solver.outer_solver in unconditional_ddim_methods:
-      epsilon_fn = mutils.get_epsilon_fn(
-        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
       outer_solver = get_ddim_chain(config, epsilon_fn)
     elif config.solver.outer_solver in unconditional_markov_methods:
-      score_fn = mutils.get_score_fn(
-        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-      fn = score_fn
       outer_solver = get_markov_chain(config, score_fn)
     else:
-      score_fn = mutils.get_score_fn(
-        sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
       # rsde = sde.reverse(score_fn)
       # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
-      outer_solver, inner_solver = get_solver(config, sde, score_fn)
+      outer_solver, _ = get_solver(config, sde, score_fn)
  
     batch_size = config.eval.batch_size
     print("\nbatch_size={}".format(batch_size))
@@ -149,7 +147,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       config.eval.batch_size//num_devices,
       config.data.image_size, config.data.image_size, config.data.num_channels)
     print("sampling shape", sampling_shape)
-  
 
     sampler = get_sampler(
       sampling_shape,
@@ -174,13 +171,13 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       q_images,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="prior samples")
+      fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
 
     plot_samples(
       q_images[0],
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="ground truth")
+      fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
     x = q_samples[0].flatten()
 
     # num_obs = int(config.data.image_size**2 / 16)
@@ -195,8 +192,8 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       num_obs = num_obs * 3  # because of tile
       mask = mask.flatten()
     elif 1:
-      # mask_name = 'square'
-      mask_name = 'half'
+      mask_name = 'square'
+      # mask_name = 'half'
       # mask_name = 'inverse_square'
       # mask_name = 'lorem3'
       mask, num_obs = get_mask(config.data.image_size, mask_name)
@@ -215,7 +212,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       jnp.expand_dims(y_image, axis=0),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="observed data")
+      fname=eval_folder + "_{}_observed_{}".format(config.data.dataset, config.solver.outer_solver))
 
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
@@ -237,34 +234,65 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
+    # Methods with matrix H
+    # cs_methods = ['Boys2023ajvp',
+    #               'Boys2023avjp',
+    #               'Boys2023ajac',
+    #               'Boys2023b',
+    #               'Song2023',
+    #               'Chung2022',
+    #               'ProjectionKalmanFilter',
+    #               'PiGDMVE',
+    #               'KGDMVE',
+    #               'KPSMLD'
+    #               'DPSSMLD']
+
+    # Methods with mask
+    cs_methods = [
+                  'KPSMLDplus',
+                  'PiGDMVEplus',
+                  'DPSSMLDplus',
+                  'Song2023plus',
+                  'Boys2023bvjpplus',
+                  'Boys2023bjvpplus',
+                  'Boys2023cplus',
+                  'chung2022scalarplus',
+                  'chung2022plus',
+                  ]
+
     ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
       'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
     markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
-    if cs_method in ddim_methods:
-      sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
-    elif cs_method in markov_methods:
-      sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
-    else:
-      sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-        y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+    num_repeats = 3
+    for j in range(num_repeats):
+      for cs_method in cs_methods:
+        config.sampling.cs_method = cs_method
+        if cs_method in ddim_methods:
+          sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+        elif cs_method in markov_methods:
+          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+        else:
+          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
 
-    if config.eval.pmap:
-      # sampler = jax.pmap(sampler, axis_name='batch')
-      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-      sample_rng = jnp.asarray(sample_rng)
-    else:
-      rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = jax.random.split(rng, 2)
+        if config.eval.pmap:
+          # sampler = jax.pmap(sampler, axis_name='batch')
+          rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+          sample_rng = jnp.asarray(sample_rng)
+        else:
+          rng, sample_rng = jax.random.split(rng, 2)
 
-    q_samples, nfe = sampler(sample_rng)
-    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-    print("q_samples ",q_samples)
-    plot_samples(
-      q_samples,
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="samples {}".format(config.sampling.cs_method.lower()))
+        q_samples, nfe = sampler(sample_rng)
+        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+        print("q_samples ",q_samples)
+        plot_samples(
+          q_samples,
+          image_size=config.data.image_size,
+          num_channels=config.data.num_channels,
+          fname=eval_folder + "/{}_{}_{}".format(config.data.dataset, config.sampling.cs_method.lower(), j))
     assert 0
 
 
@@ -365,7 +393,7 @@ def sample(config,
       q_samples,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="samples empirical score")
+      fname="{} samples".format(config.data.dataset))
     assert 0
 
 
@@ -569,7 +597,7 @@ def evaluate(config,
       q_samples,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname="samples empirical score")
+      fname="{}".format(config.data.dataset))
     assert 0
 
     # #### Don't do parallel stuff and see what happens
@@ -688,7 +716,7 @@ def evaluate(config,
           (-1, config.data.image_size, config.data.image_size, config.data.num_channels))
         # Write samples to disk or Google Cloud Storage
         with tf.io.gfile.GFile(
-            os.path.join(this_sample_dir, f"samples_{r}.npz"), "wb") as fout:
+            os.path.join(this_sample_dir, f"{r}.npz"), "wb") as fout:
           io_buffer = io.BytesIO()
           np.savez_compressed(io_buffer, samples=samples)
           fout.write(io_buffer.getvalue())

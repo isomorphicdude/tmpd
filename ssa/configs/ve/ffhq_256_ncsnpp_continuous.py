@@ -32,12 +32,6 @@ def get_config():
   sampling.predictor = 'reverse_diffusion'
   sampling.corrector = 'langevin'
 
-  # TODO: BB added this since only one checkpoint is given
-  # evaluation
-  evaluate = config.eval
-  evaluate.begin_ckpt = 48
-  evaluate.end_ckpt = 48
-
   # data
   data = config.data
   data.dataset = 'FFHQ'
@@ -70,5 +64,50 @@ def get_config():
   model.init_scale = 0.
   model.fourier_scale = 16
   model.conv_size = 3
+
+
+  # TODO: BB stuff
+  # sampling.cs_method = 'Boys2023ajvp'  # OOM for CelebA but not for CIFAR10, but doens't work particularly well for CIFAR10
+  # sampling.cs_method = 'Boys2023avjp'  # OOM for CIFAR10
+  # sampling.cs_method = 'Boys2023ajac'  # OOM for CIFAR10
+  # sampling.cs_method = 'Boys2023b'  # OOM for CelebA and CIFAR10
+  # sampling.cs_method = 'Song2023'  # OOM for CelebA but doesn't work (unstable) for CIFAR10
+  # sampling.cs_method = 'Chung2022'  # Unstable for CIFAR10
+  # sampling.cs_method = 'ProjectionKalmanFilter'
+  # sampling.cs_method = 'PiGDMVE'
+  # sampling.cs_method = 'KGDMVE'
+  # sampling.cs_method = 'KPSMLD'
+  # sampling.cs_method = 'DPSSMLD'
+  # sampling.cs_method = 'H'
+
+  # mask methods
+  # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
+  # sampling.cs_method = 'Boys2023bvjpplus'  # Unstable, stable at std=1.2 std=10.0
+  # sampling.cs_method = 'Boys2023bjvpplus'  # Unstable, stable at std=10.0
+  # sampling.cs_method = 'Boys2023cplus'  # Works form noise_std = 0.003 and above. Try other methods on noise_std=0.01 and above.
+  # sampling.cs_method = 'chung2022scalarplus'  # Unstable pretty much always
+  # sampling.cs_method = 'chung2022plus'  # Unstable, stable at std=10.0
+  # sampling.cs_method = 'KPSMLDplus'
+  # sampling.cs_method = 'PiGDMVEplus'
+  # sampling.cs_method = 'DPSSMLDplus'
+  sampling.cs_method = 'plus'
+
+  sampling.noise_std = 0.001
+  sampling.denoise = True  # work out what denoise_override is
+  sampling.innovation = True  # this will probably be superceded
+  sampling.inverse_scaler = None
+  # TODO: BB added this since only one checkpoint is given
+  evaluate = config.eval
+  evaluate.begin_ckpt = 48
+  evaluate.end_ckpt = 48
+  evaluate.batch_size = 1
+  evaluate.pmap = False
+  solver = config.solver
+  solver.num_outer_steps = config.model.num_scales
+  # solver.outer_solver = 'eulermaruyama'
+  # solver.inner_solver = None
+  # solver.outer_solver = 'DDIMVE'
+  solver.outer_solver = 'SMLD'
+  solver.eta = 1.0  # DDIM hyperparameter
 
   return config
