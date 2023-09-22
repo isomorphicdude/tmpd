@@ -1,2 +1,2 @@
 # ssa
-An API for interfacing ssa
+This repo contains the implementation for the paper 
