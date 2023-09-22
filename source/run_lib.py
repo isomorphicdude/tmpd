@@ -13,7 +13,6 @@ import diffusionjax.sde as sde_lib
 from diffusionjax.solvers import EulerMaruyama, Annealed
 
 from torch.utils.data import DataLoader
-from grfjax.utils import get_step_fn
 
 import numpy as np
 import optax

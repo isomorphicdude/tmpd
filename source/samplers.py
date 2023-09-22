@@ -1,9 +1,7 @@
 """Samplers."""
-import jax
-import jax.numpy as jnp
 from jax import jit, vmap
 from diffusionjax.utils import get_sampler as get_markov_sampler
-from grfjax.inverse_problems import (
+from inverse_problems import (
     get_dps,
     get_dps_plus,
     get_diffusion_posterior_sampling,
@@ -20,10 +18,10 @@ from grfjax.inverse_problems import (
     get_experimental_diag_approximate_posterior,
     get_experimental_diag_approximate_posterior_plus,
     get_diag_approximate_posterior)
-from grfjax.data_assimilation import get_WC4DVAR_sampler, get_WC4DVAR_representer_sampler
-from grfjax.ensemble_kalman import get_ensemble_sampler
 from diffusionjax.solvers import EulerMaruyama
-from grfjax.markov_chains import (
+from solvers import (
+    PKF,
+    DPKF,
     DPSDDPM, DPSDDPMplus,
     KPDDPM, KPSMLD,
     KPDDPMplus, KPSMLDplus,
@@ -34,6 +32,7 @@ from grfjax.markov_chains import (
 
 def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, mask, observation_map, adjoint_observation_map, stack_samples=False):
     """Create a sampling function
+    TODO: Handle euler_maruyama solver epsilon not being default value through config.
 
     Args:
         config: A `ml_collections.ConfigDict` object that contains all configuration information.
@@ -55,12 +54,12 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, mas
     if config.sampling.cs_method.lower()=='projectionkalmanfilter':
         score = model
         rsde = sde.reverse(score)
-        projection_filter = ProjectionKalmanFilter(H.shape[0], sampling_shape, sde.reverse(score), observation_map, H, num_steps=config.solver.num_outer_steps)
+        projection_filter = PKF(H.shape[0], sampling_shape, sde.reverse(score), observation_map, H, num_steps=config.solver.num_outer_steps)
         sampler = get_ensemble_sampler(sampling_shape, projection_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
     elif config.sampling.cs_method.lower()=='approxprojectionkalmanfilter':
         score = model
         rsde = sde.reverse(score)
-        projection_filter = ApproxProjectionKalmanFilter(H.shape[0], sampling_shape, sde.reverse(score), observation_map, H, num_steps=config.solver.num_outer_steps)
+        projection_filter = DPKF(H.shape[0], sampling_shape, sde.reverse(score), observation_map, H, num_steps=config.solver.num_outer_steps)
         sampler = get_ensemble_sampler(sampling_shape, projection_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
     elif config.sampling.cs_method.lower()=='chung2022scalar':
         score = model

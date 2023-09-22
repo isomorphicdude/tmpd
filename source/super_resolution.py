@@ -1,7 +1,6 @@
 # This code was taken from: https://github.com/assafshocher/resizer by Assaf Shocher
 # and the pytorch port from: https://github.com/DPS2022/diffusion-posterior-sampling/blob/main/util/resizer.py was converted to JAX
 import numpy as np
-from scipy.ndimage import filters, measurements, interpolation
 import jax.numpy as jnp
 
 

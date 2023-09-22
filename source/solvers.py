@@ -1,12 +1,154 @@
-"""Markov chains."""
-import abc
-from functools import partial
-import jax
+"""Solver classes, including Markov Chains."""
 import jax.numpy as jnp
-from jax import random
-from jax import grad, vmap, vjp
+from jax import random, grad, vmap, vjp
 from diffusionjax.utils import batch_mul
 from diffusionjax.solvers import Solver, DDIMVP, DDIMVE, SMLD, DDPM
+
+
+class PKF(Solver):
+    """Not an Projection Kalman filter. Abstract class for all concrete Projection Kalman Filter solvers.
+    Functions are designed for an ensemble of inputs."""
+
+    def __init__(self, num_y, shape, sde, observation_map, H, num_steps=1000):
+        """Construct an Esemble Kalman Filter Solver.
+        Args:
+            shape: Shape of array, x. (num_samples,) + x_shape, where x_shape is the shape
+                of the object being sampled from, for example, an image may have
+                x_shape==(H, W, C), and so shape==(N, H, W, C) where N is the number of samples.
+            sde: A valid SDE class.
+            num_steps: number of discretization time steps.
+        """
+        super().__init__(num_steps)
+        self.sde = sde
+        self.shape = shape
+        self.observation_map = observation_map
+        self.estimate_x_0 = self.get_estimate_x_0(self.sde, self.sde.score, shape[1:])
+        self.num_y = num_y
+        self.H = H
+
+    def get_estimate_x_0(self, sde, score, shape):
+        """Get an MMSE estimate of x_0
+        """
+        if type(sde).__name__=='VE':
+            def estimate_x_0(x, t):
+                v_t = sde.variance(t)
+                x = x.reshape(shape)
+                x = jnp.expand_dims(x, axis=0)
+                t = jnp.expand_dims(t, axis=0)
+                s = score(x, t)
+                s = s.flatten()
+                x = x.flatten()
+                return x + v_t * s, s
+        elif type(sde).__name__=='VP':
+            def estimate_x_0(x, t):
+                m_t = sde.mean_coeff(t)
+                v_t = sde.variance(t)
+                x = x.reshape(shape)
+                x = jnp.expand_dims(x, axis=0)
+                t = jnp.expand_dims(t, axis=0)
+                s = score(x, t)
+                s = s.flatten()
+                x = x.flatten()
+                return (x + v_t * s) / m_t, s
+        else:
+            raise ValueError("Did not recognise forward SDE (got {}, expected VE or VP)".format(type(sde).__name__))
+        return estimate_x_0
+
+    def batch_observation_map(self, x, t):
+        return vmap(lambda x: self.observation_map(x, t))(x)
+
+    def batch_analysis(self, x, t, y, noise_std, v):
+        return vmap(lambda x, t: self.analysis(x, t, y, noise_std, v), in_axes=(0, 0))(x, t)
+
+    def predict(self, rng, x, t, noise_std):
+        x = x.reshape(self.shape)
+        drift, diffusion = self.sde.sde(x, t)
+        # TODO: possible reshaping needs to occur here, if score
+        # applies to an image vector
+        alpha = self.sde.mean_coeff(t)[0]**2
+        R = alpha * noise_std**2
+        eta = jnp.sqrt(R)
+        f = drift * self.dt
+        G = diffusion * jnp.sqrt(self.dt)
+        noise = random.normal(rng, x.shape)
+        x_hat_mean = x + f
+        x_hat = x_hat_mean + batch_mul(G, noise)
+        x_hat_mean = x_hat_mean.reshape(self.shape[0], -1)
+        x_hat = x_hat.reshape(self.shape[0], -1)
+        return x_hat, x_hat_mean
+
+    def update(self, rng, x, t, y, noise_std):
+        r"""Return the drift and diffusion coefficients of the SDE.
+
+        Args:
+
+        Returns:
+            x: A JAX array of the next state.
+            x_mean: A JAX array of the next state without noise, for denoising.
+        """
+        t = t.flatten()
+        v = self.sde.variance(t)[0]
+        sqrt_v = jnp.sqrt(v)
+        sqrt_alpha = self.sde.mean_coeff(t)[0]
+        ratio = v / sqrt_alpha
+        x_hat, x_hat_mean = self.predict(rng, x, t, noise_std)
+        m = self.batch_analysis(x_hat, t, y, noise_std, ratio)  # denoise x and perform kalman update
+        # Missing a step here where x_0 is sampled as N(m, C), which makes Gaussian case exact probably
+        x = sqrt_alpha * m + jnp.sqrt(v) * random.normal(rng, x.shape)  # renoise denoised x
+        # x = sqrt_alpha * m - jnp.sqrt(v) * score # renoise denoised x
+        # x = sqrt_alpha * m - v * score # renoise denoised x
+        return x, m
+        # Summary:
+        # x = x_hat + v * score + sqrt_alpha * C_xh_hat @ jnp.linalg.solve(C_yy_hat, y - o_hat) + sqrt_v * random.normal(rng, x.shape)
+
+    def analysis(self, x_hat, t, y, noise_std, ratio):
+        _estimate_x_0 = lambda x: self.estimate_x_0(x, t)
+        m_hat, vjp_estimate_x_0, score = vjp(
+            _estimate_x_0, x_hat, has_aux=True)
+        o_hat = self.H @ m_hat
+        batch_vjp_estimate_x_0 = vmap(lambda x: vjp_estimate_x_0(x)[0])
+        C_yy = ratio * batch_vjp_estimate_x_0(self.H) @ self.H.T + noise_std**2 * jnp.eye(self.num_y)
+        ls = ratio * vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, y - o_hat))[0]
+        return m_hat + ls # , score
+
+
+class DPKF(PKF):
+    """Instead of using Tweedie second moment, use an approximation thereof."""
+
+    def __init__(self, num_y, shape, sde, observation_map, H, data_variance=1.0, num_steps=1000):
+        """Construct an Esemble Kalman Filter Solver.
+        Args:
+            shape: Shape of array, x. (num_samples,) + x_shape, where x_shape is the shape
+                of the object being sampled from, for example, an image may have
+                x_shape==(H, W, C), and so shape==(N, H, W, C) where N is the number of samples.
+            sde: A valid SDE class.
+            num_steps: number of discretization time steps.
+        """
+        self.data_variance = data_variance
+        super().__init__(num_y, shape, sde, observation_map, H, num_steps)
+
+    def analysis(self, x_hat, t, y, noise_std, v):
+        r"""Return the drift and diffusion coefficients of the SDE.
+
+        Args:
+
+        Returns:
+            x: A JAX array of the next state.
+            x_mean: A JAX array of the next state without noise, for denoising.
+        """
+        sqrt_v = jnp.sqrt(v)
+        sqrt_alpha = self.sde.mean_coeff(t)
+        ratio = v / sqrt_alpha
+        _estimate_x_0 = lambda x: self.estimate_x_0(x, t)
+        m_hat, vjp_estimate_x_0, score = vjp(
+            _estimate_x_0, x_hat, has_aux=True)
+        o_hat = self.H @ m_hat
+        data_variance = 130.0
+        # model_variance = 1. / (sqrt_alpha**2 / v + 1. / data_variance)
+        model_variance = v * self.data_variance / (sqrt_alpha**2 * self.data_variance + v)
+        C_yy = model_variance * self.H @ self.H.T + noise_std**2 * jnp.eye(self.num_y)
+        ls = ratio * vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, y - o_hat))[0]
+        return m_hat + ratio * ls
 
 
 class KGDMVP(DDIMVP):
@@ -599,3 +741,242 @@ class KPSMLDplus(KPSMLD):
         # C_yy = 1 + self.noise_std**2 / ratio
         # ls = vjp_estimate_x_0(self.mask * (self.y - x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
+
+class Euler():
+    """Euler numerical solve of an ODE. Functions are designed for a mini-batch of inputs."""
+
+    def __init__(self, ode):
+        """
+        Constructs an Euler sampler.
+        Args:
+            ode: A valid ODE class.
+        """
+        self.ode = ode
+
+    def get_update(self):
+        discretize = self.ode.discretize
+
+        def update(x, t):
+            """
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            f = discretize(x, t)
+            x = x + f
+            return x
+        return update
+
+
+class EulerMaruyama():
+    """
+    Variant on the solver from diffusionjax in that it also returns the noise
+    Euler Maruyama numerical solver of an SDE. Functions are designed for a mini-batch of inputs."""
+
+    def __init__(self, sde):
+        """Constructs an Euler Maruyama sampler.
+        Args:
+            sde: A valid SDE class.
+            score_fn: A valid score function.
+        """
+        self.sde = sde
+
+    def get_update(self):
+        discretize = self.sde.discretize
+
+        def update(rng, x, w, t):
+            """
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            f, G = discretize(x, t)
+            z = random.normal(rng, x.shape)
+            w = w + z * jnp.sqrt(self.sde.dt)
+            x_mean = x + f
+            x = x_mean + batch_mul(G, z)
+            return x, x_mean, w
+        return update
+
+
+class VelocityVerlet():
+    """Velocity verlet solve of an ODE. Functions are designed for a mini-batch of inputs."""
+
+    def __init__(self, ode):
+        """
+        Constructs a Velocity Verlet sampler.
+        Args:
+            ode: A valid ODE class.
+        """
+        self.ode = ode
+
+    def get_update(self):
+        discretize = self.ode.discretize
+
+        def update(rng, x, xd, xdd, t):
+            """
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            f, G = discretize(x, t)
+            xd1 = xd + (self.ode.dt / 2) * xdd # Half-step velocity
+            xdd1 = f - self.ode.damping * xd1  # / densities, assume density is 1.0
+            xd = xd1 + (self.ode.dt / 2) * xdd1  # Full-step velocity
+            xdd = xdd1
+            x = x + self.ode.dt * (xd + (self.ode.dt / 2) * xdd1)
+            z = random.normal(rng, x.shape)
+            x = x + batch_mul(G, z)
+            # x = x.at[bc_types == 0].set(bc_values)  # assume no boundary conditions are applied
+            return x, xd, xdd
+
+        return update
+
+
+class EulerMaruyamaUnderdamped():
+    """Euler Maruyama discretization of underdamped SDE. Functions are designed for a mini-batch of inputs."""
+
+    def __init__(self, sde):
+        """
+        Constructs an Euler Cromer sampler.
+        Args:
+            sde: A valid SDE class.
+        """
+        self.sde = sde
+
+    def get_update(self):
+        discretize = self.sde.discretize
+        sde = self.sde.sde
+
+        def update(rng, x, xd, t):
+            """
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            drift, diffusion = sde(x, t)
+            G = diffusion * jnp.sqrt(self.sde.dt)
+            xdd = drift - self.sde.damping * xd  # / densities, assume density is 1.0
+            F = xdd * self.sde.dt
+            z = random.normal(rng, x.shape)
+            xd = xd + F + batch_mul(G, z)
+            x = x + self.sde.dt * xd
+            # x = x.at[bc_types == 0].set(bc_values)  # assume no boundary conditions are applied
+            return x, xd
+
+        return update
+
+
+class MatrixEulerMaruyama():
+    """Euler Maruyama numerical solver of an SDE. Functions are designed for a mini-batch of inputs."""
+
+    def __init__(self, sde):
+        """Constructs an Euler Maruyama sampler.
+        Args:
+            sde: A valid SDE class.
+        """
+        self.sde = sde
+        self.ts = sde.ts
+
+    def get_update(self):
+        discretize = self.sde.discretize
+
+        def update(rng, x, t):
+            """
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            f, G = discretize(x, t)
+            z = random.normal(rng, x.shape)
+            x_mean = x + f
+            x = x_mean + jnp.einsum('ij, kjm -> kim', G, z)
+            return x, x_mean
+        return update
+
+
+class ChengUnderdamped():
+    """
+    This algorithm computes the exact moments conditioned on the current state and samples from them exactly."""
+
+
+    def __init__(self, sde):
+        """
+        Constructs an Euler Cromer sampler.
+        Args:
+            sde: A valid SDE class.
+        """
+        self.sde = sde
+
+    def get_update(self):
+        discretize = self.sde.discretize
+        sde = self.sde.sde
+
+        def update(rng, x, xd, t):
+            """
+            gamma is a damping parameter
+            u is a mass parameter
+            L is a Lipschitz constant, which is proportional to the maximum eigenvalue of Q,
+            and acts as an inverse mass parameter.
+            step size delta < 1
+            number of iterations n
+            initial point x0, 0
+            Args:
+                rng: A JAX random state.
+                x: A JAX array representing the current state.
+                t: A JAX array representing the current step.
+
+            Returns:
+                x: A JAX array of the next state:
+                x_mean: A JAX array. The next state without random noise. Useful for denoising.
+            """
+            # Better can be done than EM, when using an exact integrator
+            # Gibbs steps
+            drift, diffusion = sde(x, t)
+
+            const2 = - 1. / 2 * (1 - jnp.exp(-2. * self.sde.dt))  # note negative
+            const1 = self.sde.dt - (1. / 4) * jnp.exp(- 4. * self.sde.dt) - 3. / 4 + jnp.exp(-2. * self.sde.dt)
+            const3 = 1 - jnp.exp(-4. * self.sde.dt)
+            const0 = 1. / 2 * (1 + jnp.exp(-4. * self.sde.dt) - 2. * jnp.exp(-2. * self.sde.dt))
+
+            var_xd = 1. / self.sde.L * const3 - 1. / self.sde.L * const0**2 / const1
+            var_x = 1. / self.sde.L * const1 - 1. / self.sde.L * const0**2 / const3
+
+            x_mean = x - const2 * xd - 1. / (2. * self.sde.L) * (self.sde.dt + const2) * drift
+            xd_mean = xd * jnp.exp(-2. * self.sde.dt) + 1. / self.sde.L * const2 * drift
+
+            z_xd = random.normal(rng, x.shape)
+            xd = xd_mean + const0 / const1 * (x - x_mean) + jnp.sqrt(var_xd) * z_xd
+
+            x_mean = x - const2 * xd - 1. / (2. * self.sde.L) * (self.sde.dt + const2) * drift
+            rng, step_rng = random.split(rng)
+            z_x = random.normal(rng, x.shape)
+            x = x_mean + const0 / const3 * (xd - xd_mean) + jnp.sqrt(var_x) * z_x
+            return x, xd
+
+        return update

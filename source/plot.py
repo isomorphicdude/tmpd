@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 import numpy as np
-from grfjax.utils import trunc_svd
 import scipy
 
 
