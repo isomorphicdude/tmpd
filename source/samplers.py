@@ -20,13 +20,6 @@ from grfjax.inverse_problems import (
     get_experimental_diag_approximate_posterior,
     get_experimental_diag_approximate_posterior_plus,
     get_diag_approximate_posterior)
-from grfjax.ensemble_kalman import (
-    ProjectionChol,
-    ProjectionKalmanFilter,
-    ApproxProjectionKalmanFilter,
-    AdjustmentChol,
-    StochasticChol,
-    StochasticSVD)
 from grfjax.data_assimilation import get_WC4DVAR_sampler, get_WC4DVAR_representer_sampler
 from grfjax.ensemble_kalman import get_ensemble_sampler
 from diffusionjax.solvers import EulerMaruyama
@@ -59,39 +52,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, mas
         A function that takes random states and a replicated training state and outputs samples with the
         trailing dimensions matching `shape`.
     """
-
-    if config.sampling.cs_method.lower()=='stochasticsvd':  # Currently scales with O(J^{3})
-        score = model
-        rsde = sde.reverse(score)
-        kalman_filter = StochasticSVD(H.shape[0], sampling_shape, sde.reverse(score), observation_map, innovation=config.sampling.innovation, num_steps=config.solver.num_outer_steps)
-        sampler = get_ensemble_sampler(sampling_shape, kalman_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
-    elif config.sampling.cs_method.lower()=='stochasticchol':  # Currently scales approximately same as other methods
-        score = model
-        rsde = sde.reverse(score)
-        kalman_filter = StochasticChol(H.shape[0], sampling_shape, sde.reverse(score), observation_map, innovation=config.sampling.innovation, num_steps=config.solver.num_outer_steps)
-        sampler = get_ensemble_sampler(sampling_shape, kalman_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
-    elif config.sampling.cs_method.lower()=='adjustmentsvd':  # TODO: unstable and incorrect for num_y < num_ensemble
-        return ValueError()
-    elif config.sampling.cs_method.lower()=='adjustmentchol':
-        score = model
-        rsde = sde.reverse(score)
-        kalman_filter = AdjustmentChol(H.shape[0], sampling_shape, sde.reverse(score), observation_map, innovation=config.sampling.innovation, num_steps=config.solver.num_outer_steps)
-        sampler = get_ensemble_sampler(sampling_shape, kalman_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
-    elif config.sampling.cs_method.lower()=='TransformSVD':  # TODO: stable but incorrect for num_y < num_ensemble
-        return ValueError()
-    elif config.sampling.cs_method.lower()=='TranformChol':  # TODO: is a derivation possible for num_y < num_ensemble?
-        return ValueError()
-    elif config.sampling.cs_method.lower()=='projectionsvd':  # Currently scales approximately same as other methods
-        score = model
-        rsde = sde.reverse(score)
-        kalman_filter = ProjectionChol(H.shape[0], sampling_shape, sde.reverse(score), observation_map, innovation=config.sampling.innovation, num_steps=config.solver.num_outer_steps)
-        sampler = get_ensemble_sampler(sampling_shape, kalman_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
-    elif config.sampling.cs_method.lower()=='projectionchol':  # Currently scales approximately same as other methods
-        score = model
-        rsde = sde.reverse(score)
-        kalman_filter = ProjectionChol(H.shape[0], sampling_shape, sde.reverse(score), observation_map, innovation=config.sampling.innovation, num_steps=config.solver.num_outer_steps)
-        sampler = get_ensemble_sampler(sampling_shape, kalman_filter, y, config.sampling.noise_std, denoise=config.sampling.denoise, stack_samples=stack_samples, inverse_scaler=inverse_scaler)
-    elif config.sampling.cs_method.lower()=='projectionkalmanfilter':
+    if config.sampling.cs_method.lower()=='projectionkalmanfilter':
         score = model
         rsde = sde.reverse(score)
         projection_filter = ProjectionKalmanFilter(H.shape[0], sampling_shape, sde.reverse(score), observation_map, H, num_steps=config.solver.num_outer_steps)
