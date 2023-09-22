@@ -8,17 +8,13 @@ import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 import logging
-import functools
 from flax.training import checkpoints
 # TODO: Keep the import below for registering all model definitions
-from ssa.models import ddpm, ncsnv2, ncsnpp
-import ssa.losses as losses
-import ssa.sampling as sampling
+from models import ddpm, ncsnv2, ncsnpp
+import losses
 # import utils
-from ssa.models import utils as mutils
-import ssa.datasets as datasets
-import ssa.evaluation as evaluation
-import ssa.likelihood as likelihood
+from models import utils as mutils
+import datasets
 from absl import flags
 FLAGS = flags.FLAGS
 from diffusionjax.sde import VP, VE

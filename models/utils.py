@@ -1,15 +1,11 @@
 """All functions and modules related to model definition."""
 from typing import Any
-
 import flax
 import functools
 import jax.numpy as jnp
 import jax
 import numpy as np
-from ssa.models import wideresnet_noise_conditional
-from flax.training import checkpoints
 from diffusionjax.utils import batch_mul
-
 from diffusionjax.sde import VP, VE
 
 
@@ -142,7 +138,7 @@ def get_epsilon_fn(sde, model, params, states, train=False, continuous=False, re
   if isinstance(sde, VP):
     def epsilon_fn(x, t, rng=None):
       # Scale neural network output by standard deviation and flip sign
-      if continuous or isinstance(sde, sde_lib.subVPSDE):
+      if continuous:
         # For VP-trained models, t=0 corresponds to the lowest noise level
         # The maximum value of time embedding is assumed to 999 for
         # continuously-trained models.
@@ -206,7 +202,7 @@ def get_score_fn(sde, model, params, states, train=False, continuous=False, retu
   if isinstance(sde, VP):
     def score_fn(x, t, rng=None):
       # Scale neural network output by standard deviation and flip sign
-      if continuous or isinstance(sde, sde_lib.subVPSDE):
+      if continuous:
         # For VP-trained models, t=0 corresponds to the lowest noise level
         # The maximum value of time embedding is assumed to 999 for
         # continuously-trained models.
