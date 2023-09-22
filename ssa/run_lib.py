@@ -36,11 +36,92 @@ from diffusionjax.utils import get_sampler
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from grfjax.samplers import get_cs_sampler
 from grfjax.inpainting import get_mask
+from grfjax.super_resolution import Resizer
 
 import matplotlib.pyplot as plt
 
 
 num_devices = 1
+
+
+def get_prior_sample(rng, scaler, inverse_scaler, config, eval_folder):
+
+    # sampler = get_sampler(
+    #   sampling_shape,
+    #   outer_solver, inverse_scaler=None)
+
+    # if config.eval.pmap:
+    #   sampler = jax.pmap(sampler, axis_name='batch')
+    #   rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+    #   sample_rng = jnp.asarray(sample_rng)
+    # else:
+    #   rng, sample_rng = jax.random.split(rng, 2)
+
+    # q_samples, num_function_evaluations = sampler(sample_rng)
+    # print("num_function_evaluations", num_function_evaluations)
+    # print("sampling shape", q_samples.shape)
+    # print("before inverse scaler ", q_samples)
+    # q_images = inverse_scaler(q_samples.copy())
+    # print("after inverse scaler ", q_images)
+    # q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+  
+    # plot_samples(
+    #   q_images,
+    #   image_size=config.data.image_size,
+    #   num_channels=config.data.num_channels,
+    #   fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
+
+    # plot_samples(
+    #   q_images[0],
+    #   image_size=config.data.image_size,
+    #   num_channels=config.data.num_channels,
+    #   fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
+    # x = q_samples[0].flatten()
+
+
+def get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder):
+  # Build data pipeline
+  train_ds, eval_ds, _ = datasets.get_dataset(num_devices,
+                                              config,
+                                              uniform_dequantization=config.data.uniform_dequantization,
+                                              evaluation=True)
+                        
+  eval_iter = iter(eval_ds)
+  batch = next(eval_iter)
+  batch = next(eval_iter)
+  # for i, batch in enumerate(eval_iter):
+  #   for i in batch: print(i)
+  print(batch['image'].shape, "batch image shape")
+  print(batch['label'].shape, "batch label shape")
+  eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+  # print(eval_batch['image'].shape)
+  # print(eval_batch['label'].shape)
+
+  plot_samples(
+    eval_batch['image'],
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_eval_{}".format(config.data.dataset, config.solver.outer_solver))
+  x = eval_batch['image'][0].flatten()
+
+  mask_name = 'square'
+  # mask_name = 'half'
+  # mask_name = 'inverse_square'
+  # mask_name = 'lorem3'
+  mask, num_obs = get_mask(config.data.image_size, mask_name)
+  print("mask width = ", jnp.sqrt(num_obs / 3))
+
+  y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+  y = y * mask
+  H = None
+  observation_map = None
+  adjoint_observation_map = None
+
+  np.savez(eval_folder + "/_{}_eval_{}.npz".format(
+    config.data.dataset, config.solver.outer_solver),
+    x=x, y=y)
+
+  return x, y
 
 
 def image_grid(x, image_size, num_channels):
@@ -59,7 +140,7 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     plt.close()
 
 
-def inverse_problem(config, workdir, eval_folder="eval"):
+def super_resolution(config, workdir, eval_folder="eval"):
   jax.default_device = jax.devices()[0]
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
   # ... they must be all the same model of device for pmap to work
@@ -103,8 +184,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
   input_shape = (
     num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
-  x_0 = jax.random.normal(rng, input_shape)
-  t_0 = 0.999 * jnp.ones((num_devices,))
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
@@ -178,42 +257,111 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
-    x = q_samples[0].flatten()
+    x = q_samples[0]
 
-    # num_obs = int(config.data.image_size**2 / 16)
-    if 0:
-      num_obs = int(config.data.image_size)
-      idx_obs = jax.random.choice(
-        rng, config.data.image_size**2, shape=(num_obs,), replace=False)
-      mask = jnp.zeros((config.data.image_size**2,), dtype=int)
-      mask = mask.at[idx_obs].set(1)
-      mask = mask.reshape((config.data.image_size, config.data.image_size))
-      mask = jnp.tile(mask, (config.data.num_channels, 1, 1)).transpose(1, 2, 0)
-      num_obs = num_obs * 3  # because of tile
-      mask = mask.flatten()
-    elif 1:
-      mask_name = 'square'
-      # mask_name = 'half'
-      # mask_name = 'inverse_square'
-      # mask_name = 'lorem3'
-      mask, num_obs = get_mask(config.data.image_size, mask_name)
-      print("mask width = ", jnp.sqrt(num_obs / 3))
-
-    y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
-    y = y * mask
-    H = None
-    observation_map = None
-    adjoint_observation_map = None
-
-    print("y ", y)
-    y_image = inverse_scaler(y.copy())
-    print("y_image ", y_image)
+    scale_factor = 2.
+    observation_map = Resizer(sampling_shape[1:], 1. / scale_factor)
+    print("x shape", x.shape, "sampling_shape", sampling_shape[1:])
+    y = observation_map(x)
+    print("y shape", y.shape)
     plot_samples(
-      jnp.expand_dims(y_image, axis=0),
+      y,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "_{}_observed_{}".format(config.data.dataset, config.solver.outer_solver))
+      fname=eval_folder + "/_{}_observed_{}".format(
+        config.data.dataset, config.solver.outer_solver))
 
+
+def inverse_problem(config, workdir, eval_folder="eval"):
+  jax.default_device = jax.devices()[0]
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
+
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  x, y = get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    sampling_eps = 1e-3
+  elif config.training.sde.lower() == 'subvpsde':
+    # sampling_eps = 1e-3
+    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    sampling_eps = 1e-5
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  input_shape = (
+    num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+
+  begin_ckpt = config.eval.begin_ckpt
+
+  logging.info("begin checkpoint: %d" % (begin_ckpt,))
+  print("begin checkpoint: {}".format(begin_ckpt))
+  print("end checkpoint: {}".format(config.eval.end_ckpt))
+
+  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
+    # Wait if the target checkpoint doesn't exist yet
+    waiting_message_printed = False
+    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+
+    if not tf.io.gfile.exists(ckpt_filename):
+      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+
+    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+    unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
+    unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
+
+    epsilon_fn = mutils.get_epsilon_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    score_fn = mutils.get_score_fn(
+      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+    if config.solver.outer_solver in unconditional_ddim_methods:
+      outer_solver = get_ddim_chain(config, epsilon_fn)
+    elif config.solver.outer_solver in unconditional_markov_methods:
+      outer_solver = get_markov_chain(config, score_fn)
+    else:
+      # rsde = sde.reverse(score_fn)
+      # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
+      outer_solver, _ = get_solver(config, sde, score_fn)
+ 
+    batch_size = config.eval.batch_size
+    print("\nbatch_size={}".format(batch_size))
+    sampling_shape = (
+      config.eval.batch_size//num_devices,
+      config.data.image_size, config.data.image_size, config.data.num_channels)
+    print("sampling shape", sampling_shape)
+
+    # num_obs = int(config.data.image_size**2 / 16)
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
         "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
@@ -249,6 +397,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     # Methods with mask
     cs_methods = [
+                  'KGDMVEplus',
                   'KPSMLDplus',
                   'PiGDMVEplus',
                   'DPSSMLDplus',
@@ -256,14 +405,14 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                   'Boys2023bvjpplus',
                   'Boys2023bjvpplus',
                   'Boys2023cplus',
-                  'chung2022scalarplus',
-                  'chung2022plus',
+                  # 'chung2022scalarplus',
+                  # 'chung2022plus',
                   ]
 
     ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
       'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
     markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
-    num_repeats = 3
+    num_repeats = 5
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
@@ -292,7 +441,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
           q_samples,
           image_size=config.data.image_size,
           num_channels=config.data.num_channels,
-          fname=eval_folder + "/{}_{}_{}".format(config.data.dataset, config.sampling.cs_method.lower(), j))
+          fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), j))
     assert 0
 
 

@@ -72,6 +72,7 @@ def get_config():
   # sampling.cs_method = 'KGDMVE'
   # sampling.cs_method = 'KPSMLD'
   # sampling.cs_method = 'DPSSMLD'
+  # sampling.cs_method = 'H'
 
   # mask methods
   # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
@@ -83,7 +84,8 @@ def get_config():
   # sampling.cs_method = 'PiGDMVEplus'
   # sampling.cs_method = 'KGDMVEplus'
   # sampling.cs_method = 'KPSMLDplus'
-  sampling.cs_method = 'DPSSMLDplus'
+  # sampling.cs_method = 'DPSSMLDplus'
+  sampling.cs_method = 'plus'
 
   sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is
@@ -95,9 +97,9 @@ def get_config():
   evaluate.batch_size = 1
   evaluate.pmap = False
   solver = config.solver
-  # solver.outer_solver = 'eulermaruyama'
+  solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  solver.outer_solver = 'DDIMVE'
+  # solver.outer_solver = 'DDIMVE'
   # solver.outer_solver = 'SMLD'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter

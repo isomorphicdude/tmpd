@@ -147,8 +147,14 @@ def get_dataset(num_devices, config, additional_dim=None, uniform_dequantization
         img = tf.image.convert_image_dtype(img, tf.float32)
         return img
 
-  elif config.data.dataset in ['FFHQ', 'CelebAHQ']:
-    dataset_builder = tf.data.TFRecordDataset(config.data.tfrecords_path)
+  elif config.data.dataset in ['CelebAHQ']:
+    # dataset_builder = tf.data.tfrecorddataset(config.data.tfrecords_path)
+    dataset_builder = tfds.builder('celeb_a_hq/256')
+    train_split_name = eval_split_name = 'train'
+
+  elif config.data.dataset in ['FFHQ']:
+    # dataset_builder = tf.data.tfrecorddataset(config.data.tfrecords_path)
+    dataset_builder = tfds.builder('ffhq/256')
     train_split_name = eval_split_name = 'train'
 
   else:

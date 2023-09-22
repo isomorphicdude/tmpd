@@ -92,7 +92,7 @@ def get_config():
   # sampling.cs_method = 'DPSSMLDplus'
   sampling.cs_method = 'plus'
 
-  sampling.noise_std = 0.001
+  sampling.noise_std = 0.1
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
@@ -106,8 +106,8 @@ def get_config():
   solver.num_outer_steps = config.model.num_scales
   # solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  # solver.outer_solver = 'DDIMVE'
-  solver.outer_solver = 'SMLD'
+  solver.outer_solver = 'DDIMVE'
+  # solver.outer_solver = 'SMLD'
   solver.eta = 1.0  # DDIM hyperparameter
 
   return config
