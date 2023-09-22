@@ -1,22 +1,15 @@
 """Evaluation for score-based generative models."""
-import gc
-import io
 import os
 import time
-from typing import Any
-
 import flax
-import flax.jax_utils as flax_utils
+# import flax.jax_utils as flax_utils
 import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
-import tensorflow_gan as tfgan
 import logging
 import functools
-from flax.metrics import tensorboard
 from flax.training import checkpoints
-
 # TODO: Keep the import below for registering all model definitions
 from ssa.models import ddpm, ncsnv2, ncsnpp
 import ssa.losses as losses
@@ -27,9 +20,7 @@ import ssa.datasets as datasets
 import ssa.evaluation as evaluation
 import ssa.likelihood as likelihood
 from absl import flags
-
 FLAGS = flags.FLAGS
-
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.utils import get_sampler
@@ -37,46 +28,56 @@ from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from grfjax.samplers import get_cs_sampler
 from grfjax.inpainting import get_mask
 from grfjax.super_resolution import Resizer
-
 import matplotlib.pyplot as plt
 
 
 num_devices = 1
 
 
-def get_prior_sample(rng, scaler, inverse_scaler, config, eval_folder):
+unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
+unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
+ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
+  'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
+markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
 
-    # sampler = get_sampler(
-    #   sampling_shape,
-    #   outer_solver, inverse_scaler=None)
 
-    # if config.eval.pmap:
-    #   sampler = jax.pmap(sampler, axis_name='batch')
-    #   rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-    #   sample_rng = jnp.asarray(sample_rng)
-    # else:
-    #   rng, sample_rng = jax.random.split(rng, 2)
+def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder):
+    if config.solver.outer_solver in unconditional_ddim_methods:
+      outer_solver = get_ddim_chain(config, epsilon_fn)
+    elif config.solver.outer_solver in unconditional_markov_methods:
+      outer_solver = get_markov_chain(config, score_fn)
+    else:
+      outer_solver, _ = get_solver(config, sde, score_fn)
 
-    # q_samples, num_function_evaluations = sampler(sample_rng)
-    # print("num_function_evaluations", num_function_evaluations)
-    # print("sampling shape", q_samples.shape)
-    # print("before inverse scaler ", q_samples)
-    # q_images = inverse_scaler(q_samples.copy())
-    # print("after inverse scaler ", q_images)
-    # q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+    sampler = get_sampler(
+      sampling_shape,
+      outer_solver, inverse_scaler=None)
+
+    if config.eval.pmap:
+      sampler = jax.pmap(sampler, axis_name='batch')
+      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      sample_rng = jnp.asarray(sample_rng)
+    else:
+      rng, sample_rng = jax.random.split(rng, 2)
+
+    q_samples, num_function_evaluations = sampler(sample_rng)
+    q_images = inverse_scaler(q_samples.copy())
+    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
   
-    # plot_samples(
-    #   q_images,
-    #   image_size=config.data.image_size,
-    #   num_channels=config.data.num_channels,
-    #   fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
+    plot_samples(
+      q_images,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
 
-    # plot_samples(
-    #   q_images[0],
-    #   image_size=config.data.image_size,
-    #   num_channels=config.data.num_channels,
-    #   fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
-    # x = q_samples[0].flatten()
+    plot_samples(
+      q_images[0],
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
+
+    x = q_samples[0].flatten()
+    return x
 
 
 def get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder):
@@ -103,25 +104,15 @@ def get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder):
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_eval_{}".format(config.data.dataset, config.solver.outer_solver))
   x = eval_batch['image'][0].flatten()
+  return x
 
-  mask_name = 'square'
-  # mask_name = 'half'
-  # mask_name = 'inverse_square'
-  # mask_name = 'lorem3'
+
+def get_observation(rng, x, config, mask_name='square'):
+  " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
   mask, num_obs = get_mask(config.data.image_size, mask_name)
-  print("mask width = ", jnp.sqrt(num_obs / 3))
-
   y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
   y = y * mask
-  H = None
-  observation_map = None
-  adjoint_observation_map = None
-
-  np.savez(eval_folder + "/_{}_eval_{}.npz".format(
-    config.data.dataset, config.solver.outer_solver),
-    x=x, y=y)
-
-  return x, y
+  return y, mask, num_obs
 
 
 def image_grid(x, image_size, num_channels):
@@ -204,9 +195,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
 
     state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
-    unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
-
     epsilon_fn = mutils.get_epsilon_fn(
       sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
     score_fn = mutils.get_score_fn(
@@ -284,12 +272,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
   rng = jax.random.PRNGKey(config.seed + 1)
 
-  # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
-  inverse_scaler = datasets.get_data_inverse_scaler(config)
-
-  x, y = get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder)
-
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
@@ -306,61 +288,58 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    sampling_eps = 1e-3
-  elif config.training.sde.lower() == 'subvpsde':
-    # sampling_eps = 1e-3
-    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
+    # sampling_eps = 1e-3  # TODO: add this in numerical solver
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    sampling_eps = 1e-5
+    # sampling_eps = 1e-5  # TODO: add this in numerical solver
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
-
-  input_shape = (
-    num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  begin_ckpt = config.eval.begin_ckpt
+  ckpt = config.eval.begin_ckpt
 
-  logging.info("begin checkpoint: %d" % (begin_ckpt,))
-  print("begin checkpoint: {}".format(begin_ckpt))
-  print("end checkpoint: {}".format(config.eval.end_ckpt))
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
 
-  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
-    # Wait if the target checkpoint doesn't exist yet
-    waiting_message_printed = False
-    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  # Get model state from checkpoint file
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    if not tf.io.gfile.exists(ckpt_filename):
-      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  epsilon_fn = mutils.get_epsilon_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+  batch_size = config.eval.batch_size
+  print("\nbatch_size={}".format(batch_size))
+  sampling_shape = (
+    config.eval.batch_size//num_devices,
+    config.data.image_size, config.data.image_size, config.data.num_channels)
+  print("sampling shape", sampling_shape)
 
-    unconditional_ddim_methods = ['DDIMVE', 'DDIMVP', 'DDIMVEplus', 'DDIMVPplus']
-    unconditional_markov_methods = ['DDIM', 'DDIMplus', 'SMLD', 'SMLDplus']
+  num_examples = 4
+  xs = []
+  ys = []
+  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
+    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
+    noise_std=config.sampling.noise_std)
+  for i in range(num_examples):
+    x = get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder)
+    y, mask, num_obs = get_observation(rng, x, config, mask_name='square')
+    xs.append(x)
+    ys.append(y)
+    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
+      xs=jnp.array(xs), ys=jnp.array(ys))
 
-    epsilon_fn = mutils.get_epsilon_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-    score_fn = mutils.get_score_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-    if config.solver.outer_solver in unconditional_ddim_methods:
-      outer_solver = get_ddim_chain(config, epsilon_fn)
-    elif config.solver.outer_solver in unconditional_markov_methods:
-      outer_solver = get_markov_chain(config, score_fn)
-    else:
-      # rsde = sde.reverse(score_fn)
-      # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
-      outer_solver, _ = get_solver(config, sde, score_fn)
- 
-    batch_size = config.eval.batch_size
-    print("\nbatch_size={}".format(batch_size))
-    sampling_shape = (
-      config.eval.batch_size//num_devices,
-      config.data.image_size, config.data.image_size, config.data.num_channels)
-    print("sampling shape", sampling_shape)
-
+    H = None
+    observation_map = None
+    adjoint_observation_map = None
     # num_obs = int(config.data.image_size**2 / 16)
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
@@ -409,10 +388,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                   # 'chung2022plus',
                   ]
 
-    ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
-      'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
-    markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
-    num_repeats = 5
+    num_repeats = 1
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
@@ -442,7 +418,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
           image_size=config.data.image_size,
           num_channels=config.data.num_channels,
           fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), j))
-    assert 0
+  assert 0
 
 
 def sample(config,
