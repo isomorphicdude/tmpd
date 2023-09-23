@@ -100,11 +100,6 @@ def get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder):
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
 
-  plot_samples(
-    eval_batch['image'][0, 0],
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
   x = eval_batch['image'][0, 0].flatten()
   return x
 
@@ -333,6 +328,18 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   for i in range(num_examples):
     x = get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder)
     y, mask, num_obs = get_observation(rng, x, config, mask_name='square')
+    plot_samples(
+      x,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_ground_{}_{}".format(
+        config.data.dataset, config.solver.outer_solver, i))
+    plot_samples(
+      y,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_observed_{}_{}".format(
+        config.data.dataset, config.solver.outer_solver, i))
     xs.append(x)
     ys.append(y)
     np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
@@ -419,7 +426,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
           q_samples,
           image_size=config.data.image_size,
           num_channels=config.data.num_channels,
-          fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), j))
+          fname=eval_folder + "/{}_{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i, j))
   assert 0
 
 
