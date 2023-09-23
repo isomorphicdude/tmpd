@@ -95,11 +95,17 @@ def get_eval_sample(rng, scaler, inverse_scaler, config, eval_folder):
   # print(eval_batch['label'].shape)
 
   plot_samples(
-    eval_batch['image'],
+    eval_batch['image'][0],
     image_size=config.data.image_size,
     num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_eval_{}".format(config.data.dataset, config.solver.outer_solver))
-  x = eval_batch['image'][0].flatten()
+    fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
+
+  plot_samples(
+    eval_batch['image'][0, 0],
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
+  x = eval_batch['image'][0, 0].flatten()
   return x
 
 
@@ -240,7 +246,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
       q_images[0],
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
+      fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
     x = q_samples[0]
 
     scale_factor = 2.
