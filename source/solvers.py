@@ -22,36 +22,36 @@ class PKF(Solver):
         self.sde = sde
         self.shape = shape
         self.observation_map = observation_map
-        self.estimate_x_0 = self.get_estimate_x_0(self.sde, self.sde.score, shape[1:])
+        self.estimate_x_0 = self.get_estimate_x_0(self.sde, shape[1:])
         self.num_y = num_y
         self.H = H
 
-    def get_estimate_x_0(self, sde, score, shape):
+    def get_estimate_x_0(self, sde, shape):
         """Get an MMSE estimate of x_0
         """
-        if type(sde).__name__=='VE':
+        if type(sde).__name__=='RVE':
             def estimate_x_0(x, t):
                 v_t = sde.variance(t)
                 x = x.reshape(shape)
                 x = jnp.expand_dims(x, axis=0)
                 t = jnp.expand_dims(t, axis=0)
-                s = score(x, t)
+                s = sde.score(x, t)
                 s = s.flatten()
                 x = x.flatten()
                 return x + v_t * s, s
-        elif type(sde).__name__=='VP':
+        elif type(sde).__name__=='RVP':
             def estimate_x_0(x, t):
                 m_t = sde.mean_coeff(t)
                 v_t = sde.variance(t)
                 x = x.reshape(shape)
                 x = jnp.expand_dims(x, axis=0)
                 t = jnp.expand_dims(t, axis=0)
-                s = score(x, t)
+                s = sde.score(x, t)
                 s = s.flatten()
                 x = x.flatten()
                 return (x + v_t * s) / m_t, s
         else:
-            raise ValueError("Did not recognise forward SDE (got {}, expected VE or VP)".format(type(sde).__name__))
+            raise ValueError("Did not recognise reverse SDE (got {}, expected VE or VP)".format(type(sde).__name__))
         return estimate_x_0
 
     def batch_observation_map(self, x, t):
