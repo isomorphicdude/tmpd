@@ -46,7 +46,7 @@ import matplotlib.pyplot as plt
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file(
     "config", "./configs/gmm.py", "Training configuration.", lock_config=True)
-flags.DEFINE_string("workdir", "./workdir/", "Work directory.")
+flags.DEFINE_string("workdir", "./workdir", "Work directory.")
 flags.mark_flags_as_required(["workdir", "config"])
 logger = logging.getLogger(__name__)
 
