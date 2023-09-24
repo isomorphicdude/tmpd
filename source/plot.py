@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
+import jax.random as random
+from scipy.stats import wasserstein_distance
 import numpy as np
 import scipy
 

@@ -10,7 +10,7 @@ def get_estimate_h_x_0(sde, score, shape, observation_map):
     """
     def estimate_x_0(x, t):
         """The MMSE estimate for x_0|x_t,
-        which is it's expectation as given by Tweedie's formula."""
+        which is it's expetion as given by Tweedie's formula."""
         m_t = sde.mean_coeff(t)
         v_t = sde.variance(t)
         x = x.reshape(shape)
@@ -80,7 +80,6 @@ def get_dps(
     implemented with a vmap grad.
     """
     def get_l2_norm(y, estimate_h_x_0):
-        assert jnp.shape(y)[0] == jnp.shape(H)[0]
         def likelihood_score_approx(x, t):
             h_x_0, s = estimate_h_x_0(x, t)
             innovation = y - h_x_0
@@ -247,7 +246,6 @@ def get_linear_inverse_guidance(
     """
     model_variance = get_model_variance(sde)
     def get_likelihood_score(y, noise_std):
-        # y is given as just observations, H a linear operator
         def likelihood_score_approx(h_x_0, t):
             innovation = y - h_x_0
             Cyy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])

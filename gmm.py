@@ -15,7 +15,6 @@ from jax import jit, vmap, grad, jacfwd, vjp
 import jax.random as random
 import jax.numpy as jnp
 from jax.tree_util import Partial as partial
-from scipy.stats import wasserstein_distance
 
 import numpyro.distributions as dist
 import pandas as pd
@@ -272,10 +271,10 @@ def main(argv):
                 # cs_methods = ['KPDDPM', 'ProjectionKalmanFilter']
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
                 # cs_methods = ['KGDMVP']
-                cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
+                # cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
                 # cs_methods = []
                 # cs_methods = ['Song2023', 'Chung2022', 'Boys2023avjp', 'Boys2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
-                # cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
+                cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
 
                 cs_samples = []
                 for cs_method in cs_methods:
