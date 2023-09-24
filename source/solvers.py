@@ -1,15 +1,18 @@
 """Solver classes, including Markov Chains."""
 import jax.numpy as jnp
-from jax import random, grad, vmap, vjp
+from jax import random, grad, vmap, vjp, jacrev
 from diffusionjax.utils import batch_mul
 from diffusionjax.solvers import Solver, DDIMVP, DDIMVE, SMLD, DDPM
 
 
 class PKF(Solver):
     """Not an Projection Kalman filter. Abstract class for all concrete Projection Kalman Filter solvers.
-    Functions are designed for an ensemble of inputs."""
+    Functions are designed for an ensemble of inputs.
 
-    def __init__(self, num_y, shape, sde, observation_map, H, num_steps=1000):
+      TODO: rewrite for observation_map
+    """
+
+    def __init__(self, num_y, y, noise_std, shape, sde, observation_map, num_steps=1000):
         """Construct an Esemble Kalman Filter Solver.
         Args:
             shape: Shape of array, x. (num_samples,) + x_shape, where x_shape is the shape
@@ -19,18 +22,34 @@ class PKF(Solver):
             num_steps: number of discretization time steps.
         """
         super().__init__(num_steps)
+        self.y = y
+        self.noise_std = noise_std
         self.sde = sde
         self.shape = shape
         self.observation_map = observation_map
-        self.estimate_x_0 = self.get_estimate_x_0(self.sde, shape[1:])
+        self.batch_observation_map = vmap(observation_map)
+        self.estimate_h_x_0 = self.get_estimate_h_x_0(self.sde, shape[1:], observation_map)
         self.num_y = num_y
-        self.H = H
+        self.prior = self.get_prior(sde)
 
-    def get_estimate_x_0(self, sde, shape):
+    def get_prior(self, sde):
         """Get an MMSE estimate of x_0
         """
         if type(sde).__name__=='RVE':
-            def estimate_x_0(x, t):
+            def prior(rng, shape):
+                return random.normal(rng, shape) * self.sigma_max
+        elif type(sde).__name__=='RVP':
+            def prior(rng, shape):
+                return random.normal(rng, shape)
+        else:
+            raise ValueError("Did not recognise reverse SDE (got {}, expected VE or VP)".format(type(sde).__name__))
+        return prior
+
+    def get_estimate_h_x_0(self, sde, shape, observation_map):
+        """Get an MMSE estimate of x_0
+        """
+        if type(sde).__name__=='RVE':
+            def estimate_h_x_0(x, t):
                 v_t = sde.variance(t)
                 x = x.reshape(shape)
                 x = jnp.expand_dims(x, axis=0)
@@ -38,9 +57,10 @@ class PKF(Solver):
                 s = sde.score(x, t)
                 s = s.flatten()
                 x = x.flatten()
-                return x + v_t * s, s
+                x_0 = x + v_t * s
+                return observation_map(x_0), s, x_0
         elif type(sde).__name__=='RVP':
-            def estimate_x_0(x, t):
+            def estimate_h_x_0(x, t):
                 m_t = sde.mean_coeff(t)
                 v_t = sde.variance(t)
                 x = x.reshape(shape)
@@ -49,24 +69,25 @@ class PKF(Solver):
                 s = sde.score(x, t)
                 s = s.flatten()
                 x = x.flatten()
-                return (x + v_t * s) / m_t, s
+                x_0 = (x + v_t * s) / m_t
+                return observation_map(x_0), s, x_0
         else:
             raise ValueError("Did not recognise reverse SDE (got {}, expected VE or VP)".format(type(sde).__name__))
-        return estimate_x_0
+        return estimate_h_x_0
 
     def batch_observation_map(self, x, t):
         return vmap(lambda x: self.observation_map(x, t))(x)
 
-    def batch_analysis(self, x, t, y, noise_std, v):
-        return vmap(lambda x, t: self.analysis(x, t, y, noise_std, v), in_axes=(0, 0))(x, t)
+    def batch_analysis(self, x, t, v):
+        return vmap(lambda x, t: self.analysis(x, t, v), in_axes=(0, 0))(x, t)
 
-    def predict(self, rng, x, t, noise_std):
+    def predict(self, rng, x, t):
         x = x.reshape(self.shape)
         drift, diffusion = self.sde.sde(x, t)
         # TODO: possible reshaping needs to occur here, if score
         # applies to an image vector
         alpha = self.sde.mean_coeff(t)[0]**2
-        R = alpha * noise_std**2
+        R = alpha * self.noise_std**2
         eta = jnp.sqrt(R)
         f = drift * self.dt
         G = diffusion * jnp.sqrt(self.dt)
@@ -77,7 +98,7 @@ class PKF(Solver):
         x_hat = x_hat.reshape(self.shape[0], -1)
         return x_hat, x_hat_mean
 
-    def update(self, rng, x, t, y, noise_std):
+    def update(self, rng, x, t):
         r"""Return the drift and diffusion coefficients of the SDE.
 
         Args:
@@ -90,9 +111,9 @@ class PKF(Solver):
         v = self.sde.variance(t)[0]
         sqrt_v = jnp.sqrt(v)
         sqrt_alpha = self.sde.mean_coeff(t)[0]
-        ratio = v / sqrt_alpha
-        x_hat, x_hat_mean = self.predict(rng, x, t, noise_std)
-        m = self.batch_analysis(x_hat, t, y, noise_std, ratio)  # denoise x and perform kalman update
+        ratio = v / sqrt_alpha  # TODO: generalize across sdes
+        x_hat, x_hat_mean = self.predict(rng, x, t)
+        m = self.batch_analysis(x_hat, t, ratio)  # denoise x and perform kalman update
         # Missing a step here where x_0 is sampled as N(m, C), which makes Gaussian case exact probably
         x = sqrt_alpha * m + jnp.sqrt(v) * random.normal(rng, x.shape)  # renoise denoised x
         # x = sqrt_alpha * m - jnp.sqrt(v) * score # renoise denoised x
@@ -101,70 +122,32 @@ class PKF(Solver):
         # Summary:
         # x = x_hat + v * score + sqrt_alpha * C_xh_hat @ jnp.linalg.solve(C_yy_hat, y - o_hat) + sqrt_v * random.normal(rng, x.shape)
 
-    def analysis(self, x_hat, t, y, noise_std, ratio):
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t)
-        m_hat, vjp_estimate_x_0, score = vjp(
-            _estimate_x_0, x_hat, has_aux=True)
-        o_hat = self.H @ m_hat
-        batch_vjp_estimate_x_0 = vmap(lambda x: vjp_estimate_x_0(x)[0])
-        C_yy = ratio * batch_vjp_estimate_x_0(self.H) @ self.H.T + noise_std**2 * jnp.eye(self.num_y)
-        ls = ratio * vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, y - o_hat))[0]
-        return m_hat + ls # , score
-
-
-class DPKF(PKF):
-    """Instead of using Tweedie second moment, use an approximation thereof."""
-
-    def __init__(self, num_y, shape, sde, observation_map, H, data_variance=1.0, num_steps=1000):
-        """Construct an Esemble Kalman Filter Solver.
-        Args:
-            shape: Shape of array, x. (num_samples,) + x_shape, where x_shape is the shape
-                of the object being sampled from, for example, an image may have
-                x_shape==(H, W, C), and so shape==(N, H, W, C) where N is the number of samples.
-            sde: A valid SDE class.
-            num_steps: number of discretization time steps.
-        """
-        self.data_variance = data_variance
-        super().__init__(num_y, shape, sde, observation_map, H, num_steps)
-
-    def analysis(self, x_hat, t, y, noise_std, v):
-        r"""Return the drift and diffusion coefficients of the SDE.
-
-        Args:
-
-        Returns:
-            x: A JAX array of the next state.
-            x_mean: A JAX array of the next state without noise, for denoising.
-        """
-        sqrt_v = jnp.sqrt(v)
-        sqrt_alpha = self.sde.mean_coeff(t)
-        ratio = v / sqrt_alpha
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t)
-        m_hat, vjp_estimate_x_0, score = vjp(
-            _estimate_x_0, x_hat, has_aux=True)
-        o_hat = self.H @ m_hat
-        data_variance = 130.0
-        # model_variance = 1. / (sqrt_alpha**2 / v + 1. / data_variance)
-        model_variance = v * self.data_variance / (sqrt_alpha**2 * self.data_variance + v)
-        C_yy = model_variance * self.H @ self.H.T + noise_std**2 * jnp.eye(self.num_y)
-        ls = ratio * vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, y - o_hat))[0]
-        return m_hat + ratio * ls
+    def analysis(self, x, t, ratio):
+        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t)
+        h_x_0, s, x_0 = self.estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t)[0])(x)
+        H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
+        Cyy = ratio * H_grad_H_x_0 + self.noise_std**2 * jnp.eye(self.num_y)
+        innovation = self.y - h_x_0
+        f = jnp.linalg.solve(Cyy, innovation)
+        ls = ratio * grad_H_x_0.T @ f
+        return x_0 + ls # , score
 
 
 class KGDMVP(DDIMVP):
     """PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE. TODO: needs debugging"""
-    def __init__(self, y, H, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
+    def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
-        self.estimate_x_0 = self.get_estimate_x_0(model, shape)
+        self.estimate_h_x_0 = self.get_estimate_h_x_0(model, shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
-        self.H = H
         self.y = y
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
+        self.batch_observation_map = vmap(observation_map)
 
-    def get_estimate_x_0(self, model, shape):
-        def estimate_x_0(x, t, timestep):
+    def get_estimate_h_x_0(self, model, shape, observation_map):
+        def estimate_h_x_0(x, t, timestep):
             m = self.sqrt_alphas_cumprod[timestep]
             sqrt_1m_alpha = self.sqrt_1m_alphas_cumprod[timestep]
             x = x.reshape(shape)
@@ -174,17 +157,17 @@ class KGDMVP(DDIMVP):
             epsilon = epsilon.flatten()
             x = x.flatten()
             x_0 = (x - sqrt_1m_alpha * epsilon) / m
-            return x_0, epsilon
-        return estimate_x_0
+            return observation_map(x_0), (epsilon, x_0)
+        return estimate_h_x_0
 
     def analysis(self, x, t, timestep, ratio, v, m):
         x = x.flatten()
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
-        x_0, vjp_estimate_x_0, epsilon = vjp(
-            _estimate_x_0, x, has_aux=True)
-        batch_vjp_estimate_x_0 = vmap(lambda x: vjp_estimate_x_0(x)[0])
-        C_yy = ratio * batch_vjp_estimate_x_0(self.H) @ self.H.T + self.noise_std**2 * jnp.eye(self.num_y)
-        ls = vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, self.y - self.H @ x_0))[0]  # nonsense image outputs
+        h_x_0, (epsilon, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t, timestep)[0])(x)
+        H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
+        Cyy = ratio * H_grad_H_x_0 + self.noise_std**2 * jnp.eye(self.num_y)
+        f = jnp.linalg.solve(Cyy, self.y - h_x_0)
+        ls = grad_H_x_0.T @ f
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
     def posterior(self, x, t):
@@ -294,19 +277,19 @@ class KGDMVEplus(KGDMVE):
 
 
 class PiGDMVP(DDIMVP):
-    """PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE."""
-    def __init__(self, y, H, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
+    """ TODO: this is not identical to PiGDMVP in grfjax.
+    PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE."""
+    def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
-        self.estimate_x_0 = self.get_estimate_x_0(model, shape)
+        self.estimate_h_x_0 = self.get_estimate_h_x_0(model, shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
-        self.H = H
         self.y = y
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
 
-    def get_estimate_x_0(self, model, shape):
-        def estimate_x_0(x, t, timestep):
+    def get_estimate_h_x_0(self, model, shape, observation_map):
+        def estimate_h_x_0(x, t, timestep):
             m = self.sqrt_alphas_cumprod[timestep]
             sqrt_1m_alpha = self.sqrt_1m_alphas_cumprod[timestep]
             x = x.reshape(shape)
@@ -316,17 +299,16 @@ class PiGDMVP(DDIMVP):
             epsilon = epsilon.flatten()
             x = x.flatten()
             x_0 = (x - sqrt_1m_alpha * epsilon) / m
-            return x_0, epsilon
-        return estimate_x_0
+            return observation_map(x_0), (epsilon, x_0)
+        return estimate_h_x_0
 
     def analysis(self, x, t, timestep, r):
         x = x.flatten()
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
-        x_0, vjp_estimate_x_0, epsilon = vjp(
-            _estimate_x_0, x, has_aux=True)
-        batch_vjp_estimate_x_0 = vmap(lambda x: vjp_estimate_x_0(x)[0])
+        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
+        h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
+            _estimate_h_x_0, x, has_aux=True)
         C_yy = 1 + self.noise_std**2 / r
-        ls = vjp_estimate_x_0(self.H.T @ (self.y - self.H @ x_0) / C_yy)[0]
+        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return x_0.reshape(self.shape), ls.reshape(self.shape), epsilon.reshape(self.shape)
 
     def posterior(self, x, t):
@@ -437,14 +419,14 @@ class PiGDMVEplus(PiGDMVE):
 
 class DPSSMLD(SMLD):
     """DPS."""
-    def __init__(self, scale, y, H, shape, score, num_steps=1000, dt=None, epsilon=None, sigma_min=0.01, sigma_max=378.):
+    def __init__(self, scale, y, observation_map, shape, score, num_steps=1000, dt=None, epsilon=None, sigma_min=0.01, sigma_max=378.):
         super().__init__(score, num_steps, dt, epsilon, sigma_min, sigma_max)
         self.scale = scale
         self.shape = shape
         self.estimate_h_x_0 = self.get_estimate_h_x_0(score, shape, H)
         self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0)
 
-    def get_estimate_h_x_0(self, score, shape, H):
+    def get_estimate_h_x_0(self, score, shape):
         def estimate_h_x_0(x, t, timestep):
             v = self.discrete_sigmas[timestep]**2
             x = x.reshape(shape)
@@ -453,7 +435,7 @@ class DPSSMLD(SMLD):
             s = score(x, t)
             x = x.flatten()
             s = s.flatten()
-            return H @ (x + v * s), s
+            return observation_map(x + v * s), s
         return estimate_h_x_0
 
     def get_likelihood_score(self, y, estimate_h_x_0):
@@ -516,13 +498,13 @@ class DPSSMLDplus(DPSSMLD):
 
 class DPSDDPM(DDPM):
     """DPS."""
-    def __init__(self, scale, y, H, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
+    def __init__(self, scale, y, observation_map, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
         super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
         self.scale = scale
-        self.estimate_h_x_0 = self.get_estimate_h_x_0(score, shape, H)
+        self.estimate_h_x_0 = self.get_estimate_h_x_0(score, shape, observation_map)
         self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0)
 
-    def get_estimate_h_x_0(self, score, shape, H):
+    def get_estimate_h_x_0(self, score, shape, observation_map):
         def estimate_h_x_0(x, t, timestep):
             m = self.sqrt_alphas_cumprod[timestep]
             v = self.sqrt_1m_alphas_cumprod[timestep]**2
@@ -532,16 +514,15 @@ class DPSDDPM(DDPM):
             s = score(x, t)
             s = s.flatten()
             x = x.flatten()
-            return H @ (x + v * s) / m, s
+            return observation_map(x + v * s) / m, s
         return estimate_h_x_0
 
     def get_likelihood_score(self, y, estimate_h_x_0):
         def l2_norm(x, t, timestep):
-            # y is given as a d_x length vector
             h_x_0, s = estimate_h_x_0(x, t, timestep)
             innovation = y - h_x_0
             norm = jnp.linalg.norm(innovation)
-            return norm, s  # l2 norm
+            return norm, s
         grad_l2_norm = grad(l2_norm, has_aux=True)
         def likelihood_score(x, t, timestep):
             x = x.flatten()
@@ -590,18 +571,18 @@ class DPSDDPMplus(DPSDDPM):
 
 class KPDDPM(DDPM):
     """Kalman posterior for DDPM Ancestral sampling. TODO: needs debugging"""
-    def __init__(self, y, H, noise_std, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
+    def __init__(self, y, observation_map, noise_std, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
         super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
-        self.H = H
         self.y = y
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_x_0 = self.get_estimate_x_0(score, shape)
+        self.estimate_h_x_0 = self.get_estimate_h_x_0(score, shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
+        self.batch_observation_map = vmap(observation_map)
 
-    def get_estimate_x_0(self, score, shape):
-        def estimate_x_0(x, t, timestep):
+    def get_estimate_h_x_0(self, score, shape, observation_map):
+        def estimate_h_x_0(x, t, timestep):
             m = self.sqrt_alphas_cumprod[timestep]
             v = self.sqrt_1m_alphas_cumprod[timestep]**2
             x = x.reshape(shape)
@@ -611,19 +592,19 @@ class KPDDPM(DDPM):
             s = s.flatten()
             x = x.flatten()
             x_0 = (x + v * s) / m
-            return x_0, s
-        return estimate_x_0
+            return observation_map(x_0), (s, x_0)
+        return estimate_h_x_0
 
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
-        x_0, vjp_estimate_x_0, score = vjp(
-            _estimate_x_0, x, has_aux=True)
-        batch_vjp_estimate_x_0 = vmap(lambda x: vjp_estimate_x_0(x)[0])
-        C_yy = batch_vjp_estimate_x_0(self.H) @ self.H.T + self.noise_std**2 / ratio * jnp.eye(self.num_y)
-        ls = vjp_estimate_x_0(self.H.T @ jnp.linalg.solve(C_yy, self.y - self.H @ x_0))[0]  # nonsense image outputs
-        # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_0(self.H.T @ (self.y - self.H @ x_0) / C_yy)[0]
+        h_x_0, (s, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t, timestep)[0])(x)
+        H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
+        Cyy = H_grad_H_x_0 + self.noise_std**2 / ratio * jnp.eye(self.num_y)
+        innovation = self.y - h_x_0
+        f = jnp.linalg.solve(Cyy, innovation)
+        ls = grad_H_x_0.T @ f
+        # posterior_score = s + ls / ratio
         return (x_0 + ls).reshape(self.shape)
 
     def posterior(self, x, t):
