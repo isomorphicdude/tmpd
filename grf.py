@@ -31,7 +31,9 @@ from source.plot import (
     Distance2,
     Wasserstein2,
     plot,
-    plot, image_grid, plot_samples)
+    plot, image_grid, plot_samples,
+    plot_samples_1D
+)
 from source.samplers import get_cs_sampler
 
 
@@ -47,8 +49,6 @@ x_max = 5.0
 epsilon = 1e-4
 
 # For plotting
-BG_ALPHA = 1.0
-MG_ALPHA = 1.0
 FG_ALPHA = 0.3
 
 
@@ -64,13 +64,6 @@ def sample_image_rgb(rng, num_samples, image_size, kernel, num_channels):
     u = random.multivariate_normal(rng, mean=jnp.zeros(xx.shape[0]), cov=C, shape=(num_samples, num_channels))
     u = u.transpose((0, 2, 1))
     return u, C, x, z
-
-
-def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA):
-    x = np.linspace(-x_max, x_max, image_size)
-    plt.plot(x, samples[:, :, 0, 0].T, alpha=alpha)
-    plt.savefig(fname)
-    plt.close()
 
 
 def main(argv):
@@ -225,10 +218,10 @@ def main(argv):
     y_data = y.copy()
     X_data = X[idx_obs, :]
 
-    def observation_map(x, t):
+    def observation_map(x):
         return H @ x
 
-    def adjoint_observation_map(y, t):
+    def adjoint_observation_map(y):
         return H.T @ y
 
     if 'plus' in config.sampling.cs_method:
@@ -283,7 +276,7 @@ def main(argv):
         sampler = get_cs_sampler(
             config, sde, true_score, sampling_shape,
             config.sampling.inverse_scaler,
-            y, H, mask,
+            y, num_obs, H,
             observation_map, adjoint_observation_map,
             stack_samples=False)
         if config.eval.pmap:

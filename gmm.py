@@ -33,6 +33,7 @@ from diffusionjax.run_lib import get_model, NumpyLoader, train, get_solver, get_
 import diffusionjax.sde as sde_lib
 
 from source.samplers import get_cs_sampler
+from source.plot import plot_single_image, plot_image, sliced_wasserstein
 
 from flax import serialization
 import numpy as np
@@ -49,73 +50,6 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_string("workdir", "./workdir/", "Work directory.")
 flags.mark_flags_as_required(["workdir", "config"])
 logger = logging.getLogger(__name__)
-
-color_posterior = '#a2c4c9'
-color_algorithm = '#ff7878'
-dpi_val = 1200
-
-def plot_single_image(noise_std, dim, dim_y, timesteps, i, name, indices, samples, color=color_algorithm):
-    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-    ax.scatter(*samples[:, indices].T, alpha=.5, color=color, edgecolors="black", rasterized=True)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlim([-22, 22])
-    ax.set_ylim([-22, 22])
-    fig.subplots_adjust(left=.005, right=.995,
-                        bottom=.005, top=.995)
-    plt.savefig(
-        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.pdf'.format(noise_std, dim, dim_y, timesteps, i, name), dpi=dpi_val)
-    plt.savefig(
-        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.png'.format(noise_std, dim, dim_y, timesteps, i, name), transparent=True, dpi=dpi_val)
-    plt.close(fig)
-
-
-def plot_image(noise_std, dim, dim_y, timesteps, i, name, indices, diffusion_samples, target_samples=None):
-    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-    ax.scatter(*target_samples[:, indices].T, alpha=.5, color=color_posterior, edgecolors= "black", rasterized=True)
-    ax.scatter(*diffusion_samples[:, indices].T, alpha=.5, color=color_algorithm, edgecolors="black", rasterized=True)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlim([-22, 22])
-    ax.set_ylim([-22, 22])
-    fig.subplots_adjust(left=.005, right=.995,
-                        bottom=.005, top=.995)
-    plt.savefig(
-        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.pdf'.format(noise_std, dim, dim_y, timesteps, i, name), dpi=dpi_val)
-    plt.savefig(
-        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.png'.format(noise_std, dim, dim_y, timesteps, i, name), transparent=True, dpi=dpi_val)
-    plt.close(fig)
-
-
-def sliced_wasserstein(rng, dist_1, dist_2, n_slices=100):
-    projections = random.normal(rng, (n_slices, dist_1.shape[1]))
-    projections = projections / jnp.linalg.norm(projections, axis=-1)[:, None]
-    dist_1_projected = (projections @ dist_1.T)
-    dist_2_projected = (projections @ dist_2.T)
-    return np.mean([wasserstein_distance(u_values=d1, v_values=d2) for d1, d2 in zip(dist_1_projected, dist_2_projected)])
-
-
-def get_optimal_timesteps_from_singular_values(alphas_cumprod, singular_value, n_timesteps, var, jump=1, mode='equal'):
-    distances = torch.unique(var * alphas_cumprod[None, :] - (1 - alphas_cumprod)[None, :] * singular_value[:, None]**2)
-    optimal_distances = sorted(list(set((distances.abs().argmin(dim=-1, keepdims=True)).tolist())), key=lambda x: x)
-    if 0 == optimal_distances[0]:
-        optimal_distances = optimal_distances[1:]
-    timesteps = [0]
-    start_index = 0
-    start_cumprod = alphas_cumprod[0]**.5
-    end = torch.where(alphas_cumprod**.5 < 1e-2)[0][0].item()
-    target_increase = (alphas_cumprod[start_index]**.5 - alphas_cumprod[end]**.5) / (n_timesteps - 1 - len(optimal_distances))
-    last_value = start_cumprod
-    for i in range(start_index + 1, end):
-        if last_value - alphas_cumprod[i]**.5 >= target_increase:
-            timesteps.append(i)
-            last_value = alphas_cumprod[i]**.5
-        elif i in optimal_distances:
-            timesteps.append(i)
-            last_value = alphas_cumprod[i]**.5
-    timesteps += torch.ceil(torch.linspace(timesteps[-1], len(alphas_cumprod) - 1, n_timesteps - len(timesteps) + 1)).tolist()[1:]
-    adapted_timesteps = torch.tensor(timesteps).long()
-    return adapted_timesteps.numpy()
 
 
 def get_score_fn(ou_dist, sde):
@@ -167,14 +101,6 @@ def ou_mixt_numpyro(mean_coeff, means, dim, weights):
     covs = jnp.repeat(jnp.eye(dim)[None], axis=0, repeats=means.shape[0])
     return dist.MixtureSameFamily(component_distribution=dist.MultivariateNormal(
         means, covariance_matrix=covs), mixing_distribution=dist.Categorical(weights))
-
-
-def torch_sliced_wasserstein(dist_1, dist_2, n_slices=100):
-    projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
-    projections = projections / torch.linalg.norm(projections, dim=-1)[:, None]
-    dist_1_projected = (projections @ dist_1.T)
-    dist_2_projected = (projections @ dist_2.T)
-    return np.mean([wasserstein_distance(u_values=d1.cpu().numpy(), v_values=d2.cpu().numpy()) for d1, d2 in zip(dist_1_projected, dist_2_projected)])
 
 
 def ot_sliced_wasserstein(seed, dist_1, dist_2, n_slices=100):
@@ -346,7 +272,7 @@ def main(argv):
                 # cs_methods = ['KPDDPM', 'ProjectionKalmanFilter']
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
                 # cs_methods = ['KGDMVP']
-                cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023ajac', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
+                cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
                 # cs_methods = []
                 # cs_methods = ['Song2023', 'Chung2022', 'Boys2023avjp', 'Boys2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
                 # cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
@@ -382,10 +308,9 @@ def main(argv):
                     else:
                         samples = samples.reshape(config.eval.batch_size, config.data.image_size)
                         jax_sliced_wasserstein_distance = sliced_wasserstein(rng, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
-                        torch_sliced_wasserstein_distance = torch_sliced_wasserstein(dist_1=posterior_samples_torch, dist_2=torch.tensor(np.array(samples), dtype=torch.float32), n_slices=10000)
                         ot_sliced_wasserstein_distance = ot_sliced_wasserstein(seed=seed_num_inv_problem, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
 
-                        print("{}".format(config.sampling.cs_method), jax_sliced_wasserstein_distance, torch_sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
+                        print("{}".format(config.sampling.cs_method), jax_sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
 
                         dists_infos.append({"seed": seed_num_inv_problem,
                                             "dim": config.data.image_size,
@@ -394,7 +319,6 @@ def main(argv):
                                             "num_steps": config.solver.num_outer_steps,
                                             "algorithm": config.sampling.cs_method,
                                             "distance_name": 'sw',
-                                            "distance": torch_sliced_wasserstein_distance,
                                             "jax_distance": jax_sliced_wasserstein_distance,
                                             "ot_distance": ot_sliced_wasserstein_distance
                                             })

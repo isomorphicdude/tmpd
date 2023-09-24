@@ -4,10 +4,53 @@ import numpy as np
 import scipy
 
 
-# For plotting
 BG_ALPHA = 1.0
 MG_ALPHA = 1.0
 FG_ALPHA = 0.3
+color_posterior = '#a2c4c9'
+color_algorithm = '#ff7878'
+dpi_val = 1200
+
+
+def plot_single_image(noise_std, dim, dim_y, timesteps, i, name, indices, samples, color=color_algorithm):
+    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+    ax.scatter(*samples[:, indices].T, alpha=.5, color=color, edgecolors="black", rasterized=True)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlim([-22, 22])
+    ax.set_ylim([-22, 22])
+    fig.subplots_adjust(left=.005, right=.995,
+                        bottom=.005, top=.995)
+    plt.savefig(
+        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.pdf'.format(noise_std, dim, dim_y, timesteps, i, name), dpi=dpi_val)
+    plt.savefig(
+        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.png'.format(noise_std, dim, dim_y, timesteps, i, name), transparent=True, dpi=dpi_val)
+    plt.close(fig)
+
+
+def plot_image(noise_std, dim, dim_y, timesteps, i, name, indices, diffusion_samples, target_samples=None):
+    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+    ax.scatter(*target_samples[:, indices].T, alpha=.5, color=color_posterior, edgecolors= "black", rasterized=True)
+    ax.scatter(*diffusion_samples[:, indices].T, alpha=.5, color=color_algorithm, edgecolors="black", rasterized=True)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlim([-22, 22])
+    ax.set_ylim([-22, 22])
+    fig.subplots_adjust(left=.005, right=.995,
+                        bottom=.005, top=.995)
+    plt.savefig(
+        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.pdf'.format(noise_std, dim, dim_y, timesteps, i, name), dpi=dpi_val)
+    plt.savefig(
+        'inverse_problem_comparison_out_dist_{}_{}_{}_{}_{}_{}.png'.format(noise_std, dim, dim_y, timesteps, i, name), transparent=True, dpi=dpi_val)
+    plt.close(fig)
+
+
+def sliced_wasserstein(rng, dist_1, dist_2, n_slices=100):
+    projections = random.normal(rng, (n_slices, dist_1.shape[1]))
+    projections = projections / jnp.linalg.norm(projections, axis=-1)[:, None]
+    dist_1_projected = (projections @ dist_1.T)
+    dist_2_projected = (projections @ dist_2.T)
+    return np.mean([wasserstein_distance(u_values=d1, v_values=d2) for d1, d2 in zip(dist_1_projected, dist_2_projected)])
 
 
 def Wasserstein2(m1, C1, m2, C2):
@@ -28,7 +71,8 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     plt.figure(figsize=(8,8))
     plt.axis('off')
     plt.imshow(img)
-    plt.savefig(fname)
+    plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
+    plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
     plt.close()
 
 
@@ -38,11 +82,18 @@ def image_grid(x, image_size, num_channels):
     return img.reshape((w, w, image_size, image_size, num_channels)).transpose((0, 2, 1, 3, 4)).reshape((w * image_size, w * image_size, num_channels))
 
 
-def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=MG_ALPHA, x_max=5.0):
+# def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA, x_max=5.0):
+#     x = np.linspace(-x_max, x_max, image_size)
+#     plt.xlim(-x_max, x_max)
+#     plt.ylim(-3.5, 3.5)
+#     plt.plot(x, samples[:, :, 0].T, alpha=alpha)
+#     plt.savefig(fname)
+#     plt.close()
+
+
+def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA, x_max=5.0):
     x = np.linspace(-x_max, x_max, image_size)
-    plt.xlim(-x_max, x_max)
-    plt.ylim(-3.5, 3.5)
-    plt.plot(x, samples[:, :, 0].T, alpha=alpha)
+    plt.plot(x, samples[:, :, 0, 0].T, alpha=alpha)
     plt.savefig(fname)
     plt.close()
 
