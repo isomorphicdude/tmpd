@@ -302,9 +302,9 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    'KGDMVPplus',
-                    'KPDDPMplus',
-                    'PiGDMVPplus',
+                    # 'KGDMVPplus',
+                    # 'KPDDPMplus',
+                    # 'PiGDMVPplus',
                     'DPSDDPMplus',
                     'Song2023plus',
                     'Boys2023bvjpplus',
@@ -332,9 +332,9 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'KGDMVEplus',
-                    'KPSMLDplus',
-                    'PiGDMVEplus',
+                    # 'KGDMVEplus',
+                    # 'KPSMLDplus',
+                    # 'PiGDMVEplus',
                     'DPSSMLDplus',
                     'Song2023plus',
                     'Boys2023bvjpplus',

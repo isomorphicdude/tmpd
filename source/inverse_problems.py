@@ -134,20 +134,15 @@ def get_diffusion_posterior_sampling_plus(
     implemented with a single vjp.
     NOTE: This is not how they implemented their method, their method is get_dps_plus.
     """
-    def get_likelihood_score(y, mask, noise_std):
-        def likelihood_score_approx(h_x_0):
-            innovation = y - h_x_0
-            Cyy = noise_std
-            return innovation / Cyy
-        return likelihood_score_approx
 
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    likelihood_score = get_likelihood_score(y, mask, noise_std)
     def approx_posterior_score(x, t):
         x = x.flatten()
         h_x_0, vjp_estimate_h_x_0, s = vjp(
-            lambda x: estimate_x_0(x, t), x, has_aux=True)
-        ls = likelihood_score(h_x_0)
+            lambda x: estimate_h_x_0(x, t), x, has_aux=True)
+        innovation = y - h_x_0
+        Cyy = noise_std
+        ls = innovation / Cyy
         ls = vjp_estimate_h_x_0(ls)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -194,7 +189,6 @@ def get_pseudo_inverse_guidance(
         return sde.variance(t) / sde.mean_coeff(t)
 
     estimate_x_0 = get_estimate_x_0(sde, score, shape)
-    likelihood_score = get_likelihood_score()
     def approx_posterior_score(x, t):
         x = x.flatten()
         x_0, vjp_estimate_x_0, s = vjp(
@@ -214,23 +208,15 @@ def get_linear_inverse_guidance_plus(
     represented by a lambda x: mask * x
     """
     model_variance = get_model_variance(sde)
-
-    def get_likelihood_score(y, noise_std):
-        y = y.flatten()
-        def likelihood_score(h_x_0, t):
-            innovation = y - h_x_0
-            Cyy = model_variance(t) + noise_std**2
-            return innovation / Cyy
-        return likelihood_score
-
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    likelihood_score = get_likelihood_score(y, noise_std)
 
     def approx_posterior_score(x, t):
         x = x.flatten()
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
-        ls = likelihood_score(h_x_0, t)
+        innovation = y - h_x_0
+        Cyy = model_variance(t) + noise_std**2
+        ls = innovation / Cyy
         ls = vjp_estimate_h_x_0(ls)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -245,21 +231,14 @@ def get_linear_inverse_guidance(
         HHT: H @ H.T which has shape (d_y, d_y)
     """
     model_variance = get_model_variance(sde)
-    def get_likelihood_score(y, noise_std):
-        def likelihood_score_approx(h_x_0, t):
-            innovation = y - h_x_0
-            Cyy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])
-            f = jnp.linalg.solve(Cyy, innovation)
-            return f
-        return likelihood_score_approx
-
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    likelihood_score = get_likelihood_score(y, noise_std)
     def approx_posterior_score(x, t):
         x = x.flatten()
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
-        ls = likelihood_score(h_x_0, t)
+        innovation = y - h_x_0
+        Cyy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])
+        f = jnp.linalg.solve(Cyy, innovation)
         ls = vjp_estimate_h_x_0(ls)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -328,7 +307,6 @@ def get_vjp_approximate_posterior_plus(
     """
     ratio = get_ratio(sde)
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    likelihood_score = get_likelihood_score(y, noise_std)
     def approx_posterior_score(x, t):
         x = x.flatten()
         h_x_0, vjp_h_x_0, s = vjp(

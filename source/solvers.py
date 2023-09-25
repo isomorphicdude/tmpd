@@ -361,7 +361,7 @@ class DPSSMLD(SMLD):
             return norm, s
         grad_l2_norm = grad(l2_norm, has_aux=True)
         def likelihood_score(x, t, timestep):
-            x = x.flatten()
+            # x = x.flatten()
             return grad_l2_norm(x, t, timestep)
         return vmap(likelihood_score)
 
@@ -398,7 +398,7 @@ class DPSDDPM(DDPM):
             return norm, s
         grad_l2_norm = grad(l2_norm, has_aux=True)
         def likelihood_score(x, t, timestep):
-            x = x.flatten()
+            # x = x.flatten()
             return grad_l2_norm(x, t, timestep)
         return vmap(likelihood_score)
 
@@ -423,7 +423,7 @@ class DPSDDPMplus(DPSDDPM):
             return norm, s  # l2 norm
         grad_l2_norm = grad(l2_norm, has_aux=True)
         def likelihood_score(x, t, timestep):
-            x = x.flatten()
+            # x = x.flatten()
             return grad_l2_norm(x, t, timestep)
         return vmap(likelihood_score)
 
