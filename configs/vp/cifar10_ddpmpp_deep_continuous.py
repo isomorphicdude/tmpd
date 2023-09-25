@@ -103,9 +103,9 @@ def get_config():
   evaluate.batch_size = 1
   evaluate.pmap = False
   solver = config.solver
-  # solver.outer_solver = 'eulermaruyama'
+  solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  solver.outer_solver = 'DDIMVP'
+  # solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 0.0  # DDIM hyperparameter
 

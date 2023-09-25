@@ -302,16 +302,14 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    # 'KGDMVPplus',
-                    # 'KPDDPMplus',
-                    # 'PiGDMVPplus',
+                    'KGDMVPplus',
+                    'KPDDPMplus',
+                    'PiGDMVPplus',
                     'DPSDDPMplus',
                     'Song2023plus',
                     'Boys2023bvjpplus',
-                    'Boys2023bjvpplus',
-                    'Boys2023cplus',
-                    # 'chung2022scalarplus',
-                    # 'chung2022plus',
+                    'chung2022scalarplus',
+                    'chung2022plus',
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
@@ -332,16 +330,14 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    # 'KGDMVEplus',
-                    # 'KPSMLDplus',
-                    # 'PiGDMVEplus',
+                    'KGDMVEplus',
+                    'KPSMLDplus',
+                    'PiGDMVEplus',
                     'DPSSMLDplus',
                     'Song2023plus',
                     'Boys2023bvjpplus',
-                    'Boys2023bjvpplus',
-                    'Boys2023cplus',
-                    # 'chung2022scalarplus',
-                    # 'chung2022plus',
+                    'chung2022scalarplus',
+                    'chung2022plus',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -420,7 +416,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 1
+    num_repeats = 3
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
@@ -441,7 +437,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
         q_samples, nfe = sampler(sample_rng)
         q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-        print("q_samples ",q_samples)
+        print("q_samples ", q_samples)
         plot_samples(
           q_samples,
           image_size=config.data.image_size,

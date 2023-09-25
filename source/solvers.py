@@ -69,7 +69,7 @@ class PKF(Solver):
 
         else:
             raise ValueError("Did not recognise reverse SDE (got {}, expected VE or VP)".format(type(sde).__name__))
-        return estimate_h_x_0
+        return estimate_x_0
 
     def batch_observation_map(self, x, t):
         return vmap(lambda x: self.observation_map(x, t))(x)
@@ -353,25 +353,19 @@ class DPSSMLD(SMLD):
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0)
 
-    def get_likelihood_score(self, y, estimate_h_x_0):
+    def get_likelihood_score(self, y, estimate_h_x_0, shape):
         def l2_norm(x, t, timestep):
             h_x_0, (s, _) = estimate_h_x_0(x, t, timestep)
             innovation = y - h_x_0
             norm = jnp.linalg.norm(innovation)
-            return norm, s
+            return norm, s.reshape(shape)
         grad_l2_norm = grad(l2_norm, has_aux=True)
-        def likelihood_score(x, t, timestep):
-            # x = x.flatten()
-            return grad_l2_norm(x, t, timestep)
-        return vmap(likelihood_score)
+        return vmap(grad_l2_norm)
 
     def update(self, rng, x, t):
         """Return the update of the state and any auxilliary variables."""
         timestep = (t * (self.num_steps - 1) / self.t1).astype(jnp.int32)
         ls, score = self.likelihood_score(x, t, timestep)
-        # there must be a more efficient way than reshaping
-        ls = ls.reshape((-1,) + self.shape)
-        score = score.reshape((-1,) + self.shape)
         x_mean, std = self.posterior(score, x, timestep)
         x_mean -= self.scale * ls  # DPS
         z = random.normal(rng, x.shape)
@@ -388,19 +382,16 @@ class DPSDDPM(DDPM):
         super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
         self.scale = scale
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
-        self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0)
+        self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0, shape)
 
-    def get_likelihood_score(self, y, estimate_h_x_0):
+    def get_likelihood_score(self, y, estimate_h_x_0, shape):
         def l2_norm(x, t, timestep):
             h_x_0, (s, _) = estimate_h_x_0(x, t, timestep)
             innovation = y - h_x_0
             norm = jnp.linalg.norm(innovation)
-            return norm, s
+            return norm, s.reshape(shape)
         grad_l2_norm = grad(l2_norm, has_aux=True)
-        def likelihood_score(x, t, timestep):
-            # x = x.flatten()
-            return grad_l2_norm(x, t, timestep)
-        return vmap(likelihood_score)
+        return vmap(grad_l2_norm)
 
     def update(self, rng, x, t):
         """Return the update of the state and any auxilliary variables."""
@@ -415,17 +406,13 @@ class DPSDDPM(DDPM):
 
 class DPSDDPMplus(DPSDDPM):
     """DPS with a mask."""
-    def get_likelihood_score(self, y, estimate_h_x_0):
+    def get_likelihood_score(self, y, estimate_h_x_0, shape):
         def l2_norm(x, t, timestep):
-            # y is given as a d_x length vector
             h_x_0, (s, _) = estimate_h_x_0(x, t, timestep)
             norm = jnp.linalg.norm(y - h_x_0)
-            return norm, s  # l2 norm
+            return norm, s.reshape(shape)
         grad_l2_norm = grad(l2_norm, has_aux=True)
-        def likelihood_score(x, t, timestep):
-            # x = x.flatten()
-            return grad_l2_norm(x, t, timestep)
-        return vmap(likelihood_score)
+        return vmap(grad_l2_norm)
 
 
 class KPDDPM(DDPM):
@@ -461,7 +448,6 @@ class KPDDPM(DDPM):
         ratio = v / m
         x_dash = self.batch_analysis(x, t, timestep, ratio)
         alpha = self.alphas[timestep]
-        # Kalman
         m_prev = self.sqrt_alphas_cumprod_prev[timestep]
         v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
         x_mean = batch_mul(jnp.sqrt(alpha) * v_prev / v, x) + batch_mul(m_prev * beta / v, x_dash)
