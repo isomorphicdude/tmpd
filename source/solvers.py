@@ -416,15 +416,15 @@ class DPSDDPM(DDPM):
 class DPSDDPMplus(DPSDDPM):
     """DPS with a mask."""
     def get_likelihood_score(self, y, estimate_h_x_0):
-        def l2_norm(x, t):
+        def l2_norm(x, t, timestep):
             # y is given as a d_x length vector
-            h_x_0, (s, _) = estimate_h_x_0(x, t)
+            h_x_0, (s, _) = estimate_h_x_0(x, t, timestep)
             norm = jnp.linalg.norm(y - h_x_0)
             return norm, s  # l2 norm
         grad_l2_norm = grad(l2_norm, has_aux=True)
-        def likelihood_score(x, t):
+        def likelihood_score(x, t, timestep):
             x = x.flatten()
-            return grad_l2_norm(x, t)
+            return grad_l2_norm(x, t, timestep)
         return vmap(likelihood_score)
 
 
