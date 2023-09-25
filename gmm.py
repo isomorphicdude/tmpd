@@ -240,8 +240,8 @@ def main(argv):
                 #     lims=((-size * 2.5, size * 2.5), (-size * 2.5, size * 2.5)))
                 # plot_heatmap(samples=posterior_samples, area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10, fname="true posterior heatmap {}".format(i))
 
-                y = jnp.array(init_obs.numpy(), dtype=jnp.float64)
-                H = jnp.array(A.numpy(), dtype=jnp.float64)
+                y = jnp.array(init_obs.numpy(), dtype=jnp.float32)
+                H = jnp.array(A.numpy(), dtype=jnp.float32)
                 mask = None
 
                 def observation_map(x):
@@ -259,8 +259,10 @@ def main(argv):
                 # cs_methods = ['KGDMVP']
                 # cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
                 # cs_methods = []
-                # cs_methods = ['Song2023', 'Chung2022', 'Boys2023avjp', 'Boys2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
-                cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
+                cs_methods = ['Song2023', 'Chung2022', 'Boys2023avjp', 'Boys2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
+                # cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
+                # cs_methods = ['Boys2023avjp', 'Boys2023ajvp']
+                # cs_methods = ['Boys2023ajacrev', 'Boys2023ajacfwd']
 
                 cs_samples = []
                 for cs_method in cs_methods:
