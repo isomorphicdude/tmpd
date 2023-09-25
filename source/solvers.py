@@ -337,7 +337,7 @@ class PiGDMVEplus(PiGDMVE):
         x = x.flatten()
         r = v / (v + 1.)
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
-        h_x_0, vjp_estimate_x_0, (epsilon, x_0) = vjp(
+        h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
         C_yy = 1. + self.noise_std**2 / r
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
@@ -486,7 +486,7 @@ class KPDDPMplus(KPDDPM):
         C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_0((self.y - x_0) / C_yy)[0]
+        # ls = vjp_estimate_h_x_0((self.y - x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 
 
@@ -546,5 +546,5 @@ class KPSMLDplus(KPSMLD):
         C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_0((self.y - h_x_0) / C_yy)[0]
+        # ls = vjp_estimate_x_h_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
