@@ -248,6 +248,7 @@ def main(argv):
     # batch_sizes = jnp.array([480, 960, 1920, 3840])
     # batch_sizes = jnp.array([4, 16, 25, 36, 49, 64, 100, 121, 144])
     batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
+    # batch_sizes = jnp.array([753, 1500])
     # batch_sizes = jnp.array([16, 25, 36])
     # batch_sizes = jnp.array([config.eval.batch_size])
     num_repeats = 3

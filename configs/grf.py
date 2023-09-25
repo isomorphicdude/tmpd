@@ -13,9 +13,9 @@ def get_config():
     solver = config.solver
 
     # profiling arguments
-    sampling.cs_method = 'Boys2023ajvp'
     # sampling.cs_method = 'Boys2023avjp'
-    # sampling.cs_method = 'Boys2023ajacrev'
+    # sampling.cs_method = 'Boys2023ajvp'
+    sampling.cs_method = 'Boys2023ajacrev'
     # sampling.cs_method = 'Boys2023ajacfwd'
     # sampling.cs_method = 'Boys2023b'
     # sampling.cs_method = 'Song2023'
@@ -38,7 +38,6 @@ def get_config():
     training.sde = 'vpsde'
     training.num_epochs = 4000
     training.batch_size = 16
-
 
     sampling.noise_std = 0.1
     sampling.denoise = True  # work out what denoise_override is
