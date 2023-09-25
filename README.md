@@ -28,9 +28,9 @@ Reproduce our experiment by typing
 ```sh
 python grf.py:
   --config: Training configuration.
-    (default: './configs/example.py')
+    (default: './configs/grf.py')
   --workdir: Working directory
-    (default: './examples/')
+    (default: './workdir')
 ```
 
 ### GMM
@@ -40,7 +40,7 @@ python gmm.py:
   --config: Training configuration.
     (default: './configs/example2.py')
   --workdir: Working directory
-    (default: './examples/')
+    (default: './workdir')
 ```
 
 ### Noisy inpainting and super resolution
