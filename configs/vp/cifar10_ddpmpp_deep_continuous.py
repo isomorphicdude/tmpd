@@ -77,7 +77,7 @@ def get_config():
   # sampling.cs_method = 'ProjectionKalmanFilter'
   # sampling.cs_method = 'KPDDPM'
   # sampling.cs_method = 'KGDMVP'
-  sampling.cs_method = 'KPDDPM'
+  # sampling.cs_method = 'KPDDPM'
 
   # mask methods
   # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
@@ -91,6 +91,7 @@ def get_config():
   # sampling.cs_method = 'PiGDMVPplus'
   # sampling.cs_method = 'KGDMVPplus'
   # sampling.cs_method = 'KPDDPMplus'
+  sampling.cs_method = 'plus'
 
   sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is

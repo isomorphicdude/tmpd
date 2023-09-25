@@ -21,9 +21,9 @@ from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.utils import get_sampler
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
-from grfjax.samplers import get_cs_sampler
-from grfjax.inpainting import get_mask
-from grfjax.super_resolution import Resizer
+from source.samplers import get_cs_sampler
+from source.inpainting import get_mask
+from source.super_resolution import Resizer
 import matplotlib.pyplot as plt
 
 
@@ -347,8 +347,8 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       xs=jnp.array(xs), ys=jnp.array(ys))
 
     H = None
-    observation_map = None
-    adjoint_observation_map = None
+    observation_map = lambda x: mask * x
+    adjoint_observation_map = lambda y: y
     # num_obs = int(config.data.image_size**2 / 16)
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
@@ -358,19 +358,15 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
-      def observation_map(x, t):
-          return H @ x
-
-      def adjoint_observation_map(y, t):
-          return H.T @ y
-
+      observation_map = lambda x: H @ x
+      adjoint_observation_map = lambda y: H.T @ y
       y = H @ y
       # can get indices from a flat mask
       mask = None
 
     cs_method = config.sampling.cs_method
 
-    # Methods with matrix H
+    # # VE/SMLD Methods with matrix H
     # cs_methods = ['Boys2023ajvp',
     #               'Boys2023avjp',
     #               'Boys2023ajac',
@@ -383,7 +379,20 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     #               'KPSMLD'
     #               'DPSSMLD']
 
-    # Methods with mask
+    # # VP/DDPM Methods with matrix H
+    # cs_methods = ['Boys2023ajvp',
+    #               'Boys2023avjp',
+    #               'Boys2023ajac',
+    #               'Boys2023b',
+    #               'Song2023',
+    #               'Chung2022',
+    #               'ProjectionKalmanFilter',
+    #               'PiGDMVP',
+    #               'KGDMVP',
+    #               'KPDDPM'
+    #               'DPSDDPM']
+
+    # VE/SMLD methods with mask
     cs_methods = [
                   'KGDMVEplus',
                   'KPSMLDplus',
@@ -397,19 +406,29 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                   # 'chung2022plus',
                   ]
 
+    # # VP/DDM methods with mask
+    # cs_methods = [
+    #               'KGDMVPplus',
+    #               'KPDDPMplus',
+    #               'PiGDMVPplus',
+    #               'DPSDDPMplus',
+    #               'Song2023plus',
+    #               'Boys2023bvjpplus',
+    #               'Boys2023bjvpplus',
+    #               'Boys2023cplus',
+    #               # 'chung2022scalarplus',
+    #               # 'chung2022plus',
+    #               ]
     num_repeats = 1
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
         if cs_method in ddim_methods:
           sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
-        elif cs_method in markov_methods:
-          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
         else:
           sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-            y, H, mask, observation_map, adjoint_observation_map, stack_samples=False)
+            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
 
         rng, sample_rng = jax.random.split(rng, 2)
         if config.eval.pmap:

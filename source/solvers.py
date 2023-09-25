@@ -143,7 +143,7 @@ class KGDMVP(DDIMVP):
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
 
-    def analysis(self, x, t, timestep, ratio, v, m):
+    def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         h_x_0, (epsilon, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t, timestep)[0])(x)
@@ -160,7 +160,7 @@ class KGDMVP(DDIMVP):
         v = sqrt_1m_alpha**2
         ratio = v / m
         alpha = m**2
-        epsilon, ls = self.batch_analysis(x, t, timestep, ratio, v, m)
+        epsilon, ls = self.batch_analysis(x, t, timestep, ratio)
         m_prev = self.sqrt_alphas_cumprod_prev[timestep]
         v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
         alpha_prev = m_prev**2
@@ -181,7 +181,7 @@ class KGDMVPplus(KGDMVP):
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
         C_yy = ratio * vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2
-        ls = vjp_estimate_x_0((self.y - h_x_0) / C_yy)[0]
+        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
 
@@ -202,6 +202,7 @@ class KGDMVE(DDIMVE):
         self.num_y = y.shape[0]
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
+        self.observation_map = observation_map
         self.batch_observation_map  = vmap(observation_map)
 
     def analysis(self, x, t, timestep, v):
@@ -480,7 +481,7 @@ class KPDDPMplus(KPDDPM):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
-            _estimate_x_0, x, has_aux=True)
+            _estimate_h_x_0, x, has_aux=True)
         C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x))) + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         # C_yy = 1 + self.noise_std**2 / ratio
