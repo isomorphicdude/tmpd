@@ -289,11 +289,11 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'Boys2023ajacfwd',
-                    'Boys2023ajacrev',
-                    'Boys2023b',
-                    'Song2023',
-                    'Chung2022',
+                    # 'Boys2023ajacfwd',  #OOM
+                    # 'Boys2023ajacrev',  #OOM
+                    # 'Boys2023b',  #OOM
+                    # 'Song2023',
+                    # 'Chung2022',  # Unstable
                     'ProjectionKalmanFilter',
                     'PiGDMVP',
                     'KGDMVP',
@@ -317,11 +317,12 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     # sampling_eps = 1e-5  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
-      cs_methods = ['Boys2023ajacfwd',
-                    'Boys2023ajacrev',
-                    'Boys2023b',
-                    'Song2023',
-                    'Chung2022',
+      cs_methods = [
+                    # 'Boys2023ajacfwd',  #OOM batch_size=4
+                    # 'Boys2023ajacrev',  #OOM batch_size=4
+                    # 'Boys2023b',  #OOM batch_size=4
+                    # 'Song2023',
+                    # 'Chung2022',  # Unstable
                     'ProjectionKalmanFilter',
                     'PiGDMVE',
                     'KGDMVE',

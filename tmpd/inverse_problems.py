@@ -209,15 +209,14 @@ def get_linear_inverse_guidance_plus(
     """
     model_variance = get_model_variance(sde)
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-
     def approx_posterior_score(x, t):
         x = x.flatten()
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
         Cyy = model_variance(t) + noise_std**2
-        ls = innovation / Cyy
-        ls = vjp_estimate_h_x_0(ls)[0]
+        f = innovation / Cyy
+        ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
 
@@ -239,7 +238,7 @@ def get_linear_inverse_guidance(
         innovation = y - h_x_0
         Cyy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])
         f = jnp.linalg.solve(Cyy, innovation)
-        ls = vjp_estimate_h_x_0(ls)[0]
+        ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
 

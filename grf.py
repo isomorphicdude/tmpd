@@ -22,7 +22,7 @@ from tmpd.plot import (
     Distance2,
     Wasserstein2,
     plot,
-    plot, image_grid, plot_samples,
+    plot, plot_samples,
     plot_samples_1D
 )
 from tmpd.samplers import get_cs_sampler
@@ -196,9 +196,6 @@ def main(argv):
         # # true samples due to emprical covariance error
         # # but it is possible to get a value as los as 0.005 from many more true samples
         # logging.info(delta_corr)  # a value of 0.1 are good samples
-
-    index_lo = 0
-    index_hi = -1
 
     num_obs = int(config.data.image_size**2/64)
     idx_obs = random.choice(rng, config.data.image_size**2, shape=(num_obs,), replace=False)

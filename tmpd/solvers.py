@@ -25,14 +25,15 @@ class PKF(Solver):
         self.shape = shape
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
-        self.estimate_h_x_0 = self.get_estimate_h_x_0(self.sde, shape[1:], observation_map)
+        self.batch_analysis = vmap(self.analysis)
+        self.estimate_h_x_0 = self.get_estimate_x_0(self.sde, shape[1:], observation_map)
         self.num_y = num_y
         self.prior = self.get_prior(sde)
 
     def get_prior(self, sde):
         if type(sde).__name__=='RVE':
             def prior(rng, shape):
-                return random.normal(rng, shape) * self.sigma_max
+                return random.normal(rng, shape) * sde.sigma_max
         elif type(sde).__name__=='RVP':
             def prior(rng, shape):
                 return random.normal(rng, shape)
@@ -71,20 +72,9 @@ class PKF(Solver):
             raise ValueError("Did not recognise reverse SDE (got {}, expected VE or VP)".format(type(sde).__name__))
         return estimate_x_0
 
-    def batch_observation_map(self, x, t):
-        return vmap(lambda x: self.observation_map(x, t))(x)
-
-    def batch_analysis(self, x, t, v):
-        return vmap(lambda x, t: self.analysis(x, t, v), in_axes=(0, 0))(x, t)
-
     def predict(self, rng, x, t):
         x = x.reshape(self.shape)
         drift, diffusion = self.sde.sde(x, t)
-        # TODO: possible reshaping needs to occur here, if score
-        # applies to an image vector
-        alpha = self.sde.mean_coeff(t)[0]**2
-        R = alpha * self.noise_std**2
-        eta = jnp.sqrt(R)
         f = drift * self.dt
         G = diffusion * jnp.sqrt(self.dt)
         noise = random.normal(rng, x.shape)
@@ -104,14 +94,13 @@ class PKF(Solver):
             x_mean: A JAX array of the next state without noise, for denoising.
         """
         t = t.flatten()
-        v = self.sde.variance(t)[0]
-        sqrt_v = jnp.sqrt(v)
-        sqrt_alpha = self.sde.mean_coeff(t)[0]
-        ratio = v / sqrt_alpha  # TODO: generalize across sdes
-        x_hat, x_hat_mean = self.predict(rng, x, t)
+        v = self.sde.variance(t)
+        sqrt_alpha = self.sde.mean_coeff(t)
+        ratio = v / sqrt_alpha
+        x_hat, _ = self.predict(rng, x, t)
         m = self.batch_analysis(x_hat, t, ratio)  # denoise x and perform kalman update
-        # Missing a step here where x_0 is sampled as N(m, C), which makes Gaussian case exact probably
-        x = sqrt_alpha * m + jnp.sqrt(v) * random.normal(rng, x.shape)  # renoise denoised x
+        # Missing a step here where x_0 is sampled as N(m, C), which check makes linear case exact?
+        x = batch_mul(sqrt_alpha, m) + batch_mul(jnp.sqrt(v), random.normal(rng, x.shape))  # renoise denoised x
         # x = sqrt_alpha * m - jnp.sqrt(v) * score # renoise denoised x
         # x = sqrt_alpha * m - v * score # renoise denoised x
         return x, m
@@ -119,15 +108,14 @@ class PKF(Solver):
         # x = x_hat + v * score + sqrt_alpha * C_xh_hat @ jnp.linalg.solve(C_yy_hat, y - o_hat) + sqrt_v * random.normal(rng, x.shape)
 
     def analysis(self, x, t, ratio):
-        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t)
-        h_x_0, s, x_0 = self.estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        h_x_0, (_, x_0) = self.estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
         Cyy = ratio * H_grad_H_x_0 + self.noise_std**2 * jnp.eye(self.num_y)
         innovation = self.y - h_x_0
         f = jnp.linalg.solve(Cyy, innovation)
         ls = ratio * grad_H_x_0.T @ f
-        return x_0 + ls # , score
+        return (x_0 + ls).reshape(self.shape[1:])
 
 
 class KGDMVP(DDIMVP):
