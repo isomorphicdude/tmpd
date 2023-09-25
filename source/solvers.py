@@ -438,6 +438,7 @@ class KPDDPM(DDPM):
         self.num_y = y.shape[0]
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
+        self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
 
     def analysis(self, x, t, timestep, ratio):
@@ -482,7 +483,7 @@ class KPDDPMplus(KPDDPM):
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x))) + self.noise_std**2 / ratio
+        C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         # C_yy = 1 + self.noise_std**2 / ratio
         # ls = vjp_estimate_x_0((self.y - x_0) / C_yy)[0]
@@ -499,6 +500,7 @@ class KPSMLD(SMLD):
         self.num_y = y.shape[0]
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
+        self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
 
     def analysis(self, x, t, timestep, v):
@@ -539,10 +541,10 @@ class KPSMLDplus(KPSMLD):
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
-        x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
+        h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
         C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_0((self.y - x_0) / C_yy)[0]
+        # ls = vjp_estimate_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)

@@ -286,9 +286,63 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
     # sampling_eps = 1e-3  # TODO: add this in numerical solver
+    if 'plus' not in config.sampling.cs_method:
+      # VP/DDPM Methods with matrix H
+      cs_methods = ['Boys2023ajvp',
+                    'Boys2023avjp',
+                    'Boys2023ajac',
+                    'Boys2023b',
+                    'Song2023',
+                    'Chung2022',
+                    'ProjectionKalmanFilter',
+                    'PiGDMVP',
+                    'KGDMVP',
+                    'KPDDPM'
+                    'DPSDDPM']
+    else:
+      # VP/DDM methods with mask
+      cs_methods = [
+                    'KGDMVPplus',
+                    'KPDDPMplus',
+                    'PiGDMVPplus',
+                    'DPSDDPMplus',
+                    'Song2023plus',
+                    'Boys2023bvjpplus',
+                    'Boys2023bjvpplus',
+                    'Boys2023cplus',
+                    # 'chung2022scalarplus',
+                    # 'chung2022plus',
+                    ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
     # sampling_eps = 1e-5  # TODO: add this in numerical solver
+    if 'plus' not in config.sampling.cs_method:
+      # VE/SMLD Methods with matrix H
+      cs_methods = ['Boys2023ajvp',
+                    'Boys2023avjp',
+                    'Boys2023ajac',
+                    'Boys2023b',
+                    'Song2023',
+                    'Chung2022',
+                    'ProjectionKalmanFilter',
+                    'PiGDMVE',
+                    'KGDMVE',
+                    'KPSMLD'
+                    'DPSSMLD']
+    else:
+      # VE/SMLD methods with mask
+      cs_methods = [
+                    'KGDMVEplus',
+                    'KPSMLDplus',
+                    'PiGDMVEplus',
+                    'DPSSMLDplus',
+                    'Song2023plus',
+                    'Boys2023bvjpplus',
+                    'Boys2023bjvpplus',
+                    'Boys2023cplus',
+                    # 'chung2022scalarplus',
+                    # 'chung2022plus',
+                    ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
@@ -366,59 +420,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    # # VE/SMLD Methods with matrix H
-    # cs_methods = ['Boys2023ajvp',
-    #               'Boys2023avjp',
-    #               'Boys2023ajac',
-    #               'Boys2023b',
-    #               'Song2023',
-    #               'Chung2022',
-    #               'ProjectionKalmanFilter',
-    #               'PiGDMVE',
-    #               'KGDMVE',
-    #               'KPSMLD'
-    #               'DPSSMLD']
-
-    # # VP/DDPM Methods with matrix H
-    # cs_methods = ['Boys2023ajvp',
-    #               'Boys2023avjp',
-    #               'Boys2023ajac',
-    #               'Boys2023b',
-    #               'Song2023',
-    #               'Chung2022',
-    #               'ProjectionKalmanFilter',
-    #               'PiGDMVP',
-    #               'KGDMVP',
-    #               'KPDDPM'
-    #               'DPSDDPM']
-
-    # VE/SMLD methods with mask
-    cs_methods = [
-                  'KGDMVEplus',
-                  'KPSMLDplus',
-                  'PiGDMVEplus',
-                  'DPSSMLDplus',
-                  'Song2023plus',
-                  'Boys2023bvjpplus',
-                  'Boys2023bjvpplus',
-                  'Boys2023cplus',
-                  # 'chung2022scalarplus',
-                  # 'chung2022plus',
-                  ]
-
-    # # VP/DDM methods with mask
-    # cs_methods = [
-    #               'KGDMVPplus',
-    #               'KPDDPMplus',
-    #               'PiGDMVPplus',
-    #               'DPSDDPMplus',
-    #               'Song2023plus',
-    #               'Boys2023bvjpplus',
-    #               'Boys2023bjvpplus',
-    #               'Boys2023cplus',
-    #               # 'chung2022scalarplus',
-    #               # 'chung2022plus',
-    #               ]
     num_repeats = 1
     for j in range(num_repeats):
       for cs_method in cs_methods:
