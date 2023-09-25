@@ -1,13 +1,6 @@
-"""
-Two dimensional Gaussian Random Field for profiling purposes.
-"""
-# Uncomment to enable double precision
-# from jax.config import config as jax_config
-# jax_config.update("jax_enable_x64", True)
-
+"""Two dimensional Gaussian Random Field example."""
 from absl import app, flags
 from ml_collections.config_flags import config_flags
-
 import jax
 from jax import jit, vmap
 import jax.random as random
@@ -17,7 +10,6 @@ from diffusionjax.plot import plot_heatmap
 from diffusionjax.solvers import EulerMaruyama
 import diffusionjax.sde as sde_lib
 from diffusionjax.utils import get_sampler
-
 from mlkernels import Matern52
 import lab as B
 import numpy as np
@@ -26,15 +18,14 @@ from probit.utilities import log_gaussian_likelihood
 import scipy
 import logging
 import time
-
-from source.plot import (
+from tmpd.plot import (
     Distance2,
     Wasserstein2,
     plot,
     plot, image_grid, plot_samples,
     plot_samples_1D
 )
-from source.samplers import get_cs_sampler
+from tmpd.samplers import get_cs_sampler
 
 
 FLAGS = flags.FLAGS

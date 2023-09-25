@@ -1,39 +1,25 @@
-"""Diffusion models introduction.
-
-Gaussian Mixture Model example.
-"""
-# Uncomment to enable double precision
-from jax.config import config as jax_config
-jax_config.update("jax_enable_x64", True)
-
-# extra imports used for this example
+"""Gaussian Mixture Model example."""
 from absl import app, flags
 from ml_collections.config_flags import config_flags
-
 import jax
 from jax import jit, vmap, grad, jacfwd, vjp
 import jax.random as random
 import jax.numpy as jnp
 from jax.tree_util import Partial as partial
-
 import numpyro.distributions as dist
 import pandas as pd
 from tqdm import trange
-
 import torch
 from torch import tensor, ones, eye, randn_like, randn, vstack, manual_seed
 from torch.utils.data import Dataset
 from torch.distributions import MixtureSameFamily, MultivariateNormal, Categorical
-
 from diffusionjax.plot import (plot_samples, plot_score,
      plot_heatmap, plot_scatter)
 from diffusionjax.utils import get_sampler
 from diffusionjax.run_lib import get_model, NumpyLoader, train, get_solver, get_markov_chain, get_ddim_chain
 import diffusionjax.sde as sde_lib
-
-from source.samplers import get_cs_sampler
-from source.plot import plot_single_image, plot_image, sliced_wasserstein
-
+from tmpd.samplers import get_cs_sampler
+from tmpd.plot import plot_single_image, plot_image, sliced_wasserstein
 from flax import serialization
 import numpy as np
 import time

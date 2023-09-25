@@ -21,9 +21,9 @@ from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
 from diffusionjax.utils import get_sampler
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
-from source.samplers import get_cs_sampler
-from source.inpainting import get_mask
-from source.super_resolution import Resizer
+from tmpd.samplers import get_cs_sampler
+from tmpd.inpainting import get_mask
+from tmpd.super_resolution import Resizer
 import matplotlib.pyplot as plt
 
 

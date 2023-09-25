@@ -19,13 +19,11 @@ extra_link_args = []
 
 
 setup(
-    name="ssa",
-    version="0.1.0",
-    description="An API for interfacing grfjax and diffusionjax",
+    name="tmpd",
+    version="0.0.0",
+    description="tmpd is a diffusion package for solving linear inverse problems",
     long_description=README,
     long_description_content_type="text/markdown",
-    url="https://github.com/bb515/ssa",
-    author="Benjamin Boys",
     license="MIT",
     packages=find_packages(exclude=['*.test']),
     include_package_data=True,
