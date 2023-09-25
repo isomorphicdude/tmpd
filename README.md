@@ -7,7 +7,7 @@ Contents:
 - [Experiments](#experiments)
     - [Gaussian](#gaussian)
     - [Gaussian Mixture Model](#gmm)
-    - [Noisy inpainting](#noisy-inpainting)
+    - [Noisy inpainting and super resolution](#noisy-inpainting-and-super-resolution)
 - [References](#references)
 
 ## Installation
@@ -43,7 +43,7 @@ python gmm.py:
     (default: './examples/')
 ```
 
-### Noisy Inpainting
+### Noisy inpainting and super resolution
 
 First, download the checkpoints and place them into an `exp/` folder in the working directory of this README file.
 
