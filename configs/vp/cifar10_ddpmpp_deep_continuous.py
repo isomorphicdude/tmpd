@@ -77,13 +77,11 @@ def get_config():
   # sampling.cs_method = 'ProjectionKalmanFilter'
   # sampling.cs_method = 'KPDDPM'
   # sampling.cs_method = 'KGDMVP'
-  # sampling.cs_method = 'KPDDPM'
+  sampling.cs_method = 'KPDDPM'
 
   # mask methods
   # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
   # sampling.cs_method = 'Boys2023bvjpplus'  # Unstable, stable at std=1.2 std=10.0
-  # sampling.cs_method = 'Boys2023bjvpplus'  # Unstable, stable at std=10.0
-  # sampling.cs_method = 'Boys2023cplus'  # Works form noise_std = 0.003 and above. Try other methods on noise_std=0.01 and above.
   # sampling.cs_method = 'chung2022scalarplus'  # Unstable pretty much always
   # sampling.cs_method = 'chung2022plus'  # Unstable, stable at std=10.0
   # sampling.cs_method = 'KPDDPMplus'
@@ -91,17 +89,16 @@ def get_config():
   # sampling.cs_method = 'PiGDMVPplus'
   # sampling.cs_method = 'KGDMVPplus'
   # sampling.cs_method = 'KPDDPMplus'
-  sampling.cs_method = 'plus'
 
   sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
-  evaluate = config.eval
-  evaluate.begin_ckpt = 8  # 12
-  evaluate.end_ckpt = 8  # 12
-  evaluate.batch_size = 1
-  evaluate.pmap = False
+  eval = config.eval
+  eval.begin_ckpt = 8  # 12
+  eval.end_ckpt = 8  # 12
+  eval.batch_size = 4
+  eval.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None

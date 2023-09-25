@@ -351,7 +351,7 @@ class DPSSMLD(SMLD):
         self.scale = scale
         self.shape = shape
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
-        self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0)
+        self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0, shape)
 
     def get_likelihood_score(self, y, estimate_h_x_0, shape):
         def l2_norm(x, t, timestep):

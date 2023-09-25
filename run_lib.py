@@ -288,9 +288,9 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     # sampling_eps = 1e-3  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
-      cs_methods = ['Boys2023ajvp',
-                    'Boys2023avjp',
-                    'Boys2023ajac',
+      cs_methods = [
+                    'Boys2023ajacfwd',
+                    'Boys2023ajacrev',
                     'Boys2023b',
                     'Song2023',
                     'Chung2022',
@@ -307,6 +307,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                     'PiGDMVPplus',
                     'DPSDDPMplus',
                     'Song2023plus',
+                    'Boys2023ajacrevplus',
                     'Boys2023bvjpplus',
                     'chung2022scalarplus',
                     'chung2022plus',
@@ -316,9 +317,8 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     # sampling_eps = 1e-5  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
-      cs_methods = ['Boys2023ajvp',
-                    'Boys2023avjp',
-                    'Boys2023ajac',
+      cs_methods = ['Boys2023ajacfwd',
+                    'Boys2023ajacrev',
                     'Boys2023b',
                     'Song2023',
                     'Chung2022',
@@ -335,6 +335,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                     'PiGDMVEplus',
                     'DPSSMLDplus',
                     'Song2023plus',
+                    'Boys2023ajacrevplus',
                     'Boys2023bvjpplus',
                     'chung2022scalarplus',
                     'chung2022plus',

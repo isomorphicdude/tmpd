@@ -1,20 +1,19 @@
 """Samplers."""
 from jax import jit, vmap
 from diffusionjax.utils import get_sampler
-from source.inverse_problems import (
+from tmpd.inverse_problems import (
     get_dps,
     get_dps_plus,
     get_diffusion_posterior_sampling,
     get_diffusion_posterior_sampling_plus,
     get_linear_inverse_guidance,
     get_linear_inverse_guidance_plus,
-    get_jacrev_approximate_posterior_plus,
     get_jacrev_approximate_posterior,
     get_jacfwd_approximate_posterior,
     get_vjp_approximate_posterior_plus,
     get_diag_approximate_posterior)
 from diffusionjax.solvers import EulerMaruyama
-from source.solvers import (
+from tmpd.solvers import (
     PKF,
     DPSDDPM, DPSDDPMplus,
     KPDDPM, KPSMLD,
@@ -94,6 +93,12 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         score = model
         # NOTE Using full jacobian will be slower in cases with d_y \approx d_x ?
         # TODO: can replace with https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#jacobian-matrix-and-matrix-jacobian-products if faster
+        posterior_score = jit(vmap(get_jacrev_approximate_posterior(
+                sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
+                in_axes=(0, 0), out_axes=(0)))
+        sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
+    elif config.sampling.cs_method.lower()=='boys2023ajacrevplus':
+        score = model
         posterior_score = jit(vmap(get_jacrev_approximate_posterior(
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
                 in_axes=(0, 0), out_axes=(0)))

@@ -268,34 +268,6 @@ def get_diag_approximate_posterior(sde, score, shape, y, noise_std, observation_
     return approx_posterior_score
 
 
-def get_jacrev_approximate_posterior_plus(sde, score, shape, y, noise_std, observation_map):
-    """
-    Uses full second moment approximation of the covariance of x_0|x_t.
-
-    Computes using the full Jacobian, computed using reverse mode.
-    In early tests, this was around two times slower
-    than vjp for a sparse observation inpainting operator (d_x=64, d_y=2).
-    vjp should have scaling with d_x.
-    """
-    ratio = get_ratio(sde)
-    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    batch_observation_map = vmap(observation_map)
-    def approx_posterior_score(x, t):
-        x = x.flatten()
-        _estimate_h_x_0 = lambda x: estimate_h_x_0(x, t)[0]
-        h_x_0, s = estimate_h_x_0(x, t)
-        Sigma_d_r_t = jacrev(_estimate_h_x_0)(x)
-        Sigma = batch_observation_map(Sigma_d_r_t) * ratio(t)  # assumes H linear
-        Cyy = Sigma + noise_std**2 * jnp.eye(y.shape[0])
-        innovation = y - h_x_0
-        f = jnp.linalg.solve(Cyy, innovation)
-        ls = Sigma_d_r_t @ f
-        posterior_score = s + ls
-        return posterior_score.reshape(shape)
-
-    return approx_posterior_score
-
-
 def get_vjp_approximate_posterior_plus(
         sde, score, shape, y, noise_std, observation_map):
     """
