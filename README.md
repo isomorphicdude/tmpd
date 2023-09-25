@@ -24,7 +24,7 @@ Make sure the tensorflow and jax versions are as above and are working on your a
 ## Experiments
 
 ### Gaussian
-Run the example by typing 
+Reproduce our experiment by typing 
 ```sh
 python grf.py:
   --config: Training configuration.
@@ -34,7 +34,7 @@ python grf.py:
 ```
 
 ### GMM
-Run the example by typing 
+Reproduce our experiment by typing 
 ```sh
 python gmm.py:
   --config: Training configuration.
