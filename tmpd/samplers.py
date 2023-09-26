@@ -16,7 +16,6 @@ from tmpd.inverse_problems import (
     get_diag_approximate_posterior)
 from diffusionjax.solvers import EulerMaruyama
 from tmpd.solvers import (
-    PKF,
     DPSDDPM, DPSDDPMplus,
     KPDDPM, KPSMLD,
     KPDDPMplus, KPSMLDplus,
@@ -49,11 +48,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         A function that takes random states and a replicated training state and outputs samples with the
         trailing dimensions matching `shape`.
     """
-    if config.sampling.cs_method.lower()=='projectionkalmanfilter':
-        score = model
-        outer_solver = PKF(num_y, y, config.sampling.noise_std, sampling_shape, sde.reverse(score), observation_map, num_steps=config.solver.num_outer_steps)
-        sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
-    elif config.sampling.cs_method.lower()=='chung2022scalar':
+    if config.sampling.cs_method.lower()=='chung2022scalar':
         score = model
         scale = config.solver.num_outer_steps * 1.
         posterior_score = jit(vmap(get_dps(

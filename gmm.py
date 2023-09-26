@@ -19,7 +19,7 @@ from diffusionjax.utils import get_sampler
 from diffusionjax.run_lib import get_model, NumpyLoader, train, get_solver, get_markov_chain, get_ddim_chain
 import diffusionjax.sde as sde_lib
 from tmpd.samplers import get_cs_sampler
-from tmpd.plot import plot_single_image, plot_image, sliced_wasserstein
+from tmpd.plot import plot_single_image, plot_image
 from flax import serialization
 import numpy as np
 import time
@@ -27,6 +27,7 @@ import os
 import logging
 import ot
 import matplotlib.pyplot as plt
+from scipy.stats import wasserstein_distance
 
 
 FLAGS = flags.FLAGS
@@ -35,6 +36,14 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_string("workdir", "./workdir", "Work directory.")
 flags.mark_flags_as_required(["workdir", "config"])
 logger = logging.getLogger(__name__)
+
+
+def sliced_wasserstein(dist_1, dist_2, n_slices=100):
+    projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
+    projections = projections / torch.linalg.norm(projections, dim=-1)[:, None]
+    dist_1_projected = (projections @ dist_1.T)
+    dist_2_projected = (projections @ dist_2.T)
+    return np.mean([wasserstein_distance(u_values=d1.cpu().numpy(), v_values=d2.cpu().numpy()) for d1, d2 in zip(dist_1_projected, dist_2_projected)])
 
 
 def get_score_fn(ou_dist, sde):
@@ -294,10 +303,10 @@ def main(argv):
                         # plot_heatmap(samples=samples, area_min=-size * 2.5, area_max=size * 2.5, fname="{} heatmap conditional".format(config.sampling.cs_method))
                     else:
                         samples = samples.reshape(config.eval.batch_size, config.data.image_size)
-                        jax_sliced_wasserstein_distance = sliced_wasserstein(rng, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
+                        sliced_wasserstein_distance = sliced_wasserstein(dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
                         ot_sliced_wasserstein_distance = ot_sliced_wasserstein(seed=seed_num_inv_problem, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
 
-                        print("{}".format(config.sampling.cs_method), jax_sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
+                        print("{}".format(config.sampling.cs_method), sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
 
                         dists_infos.append({"seed": seed_num_inv_problem,
                                             "dim": config.data.image_size,
@@ -306,7 +315,7 @@ def main(argv):
                                             "num_steps": config.solver.num_outer_steps,
                                             "algorithm": config.sampling.cs_method,
                                             "distance_name": 'sw',
-                                            "jax_distance": jax_sliced_wasserstein_distance,
+                                            "distance": sliced_wasserstein_distance,
                                             "ot_distance": ot_sliced_wasserstein_distance
                                             })
                         # Plot the image for the paper!

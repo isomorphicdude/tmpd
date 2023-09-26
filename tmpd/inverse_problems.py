@@ -305,7 +305,6 @@ def get_vjp_approximate_posterior(
     Computes using vjps where possible. TODO: profile vs jvp methods.
     """
     ratio = get_ratio(sde)
-    observation_map = lambda x: H @ x
     estimate_x_0 = get_estimate_h_x_0(sde, score, shape, lambda x: x)
     def approx_posterior_score(x, t):
         x = x.flatten()
@@ -314,7 +313,7 @@ def get_vjp_approximate_posterior(
         vec_vjp_x_0 = vmap(vjp_x_0)
         H_grad_x_0 = vec_vjp_x_0(H)[0]
         Cyy = ratio(t) * H @ H_grad_x_0.T + noise_std**2 * jnp.eye(y.shape[0])
-        innovation = y - observation_map(x_0)
+        innovation = y - H @ x_0
         f = jnp.linalg.solve(Cyy, innovation)
         ls = vjp_x_0(H.T @ f)[0]
         posterior_score = s + ls

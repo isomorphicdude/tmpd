@@ -90,7 +90,7 @@ def get_config():
   # sampling.cs_method = 'KGDMVPplus'
   sampling.cs_method = 'KPDDPMplus'
 
-  sampling.noise_std = 0.001
+  sampling.noise_std = 0.1
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None

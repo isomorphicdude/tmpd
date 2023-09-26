@@ -128,8 +128,6 @@ def main(argv):
 
         # Running the reverse SDE with the true score
         solver = EulerMaruyama(sde.reverse(true_score), num_steps=config.solver.num_outer_steps)
-        plot_beta_schedule(sde, tmp_solver)
-        plot_temperature_schedule(sde, tmp_solver)
         sampler= get_sampler((config.eval.batch_size//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels), solver)
         if config.eval.pmap:
             sampler = jax.pmap(sampler, axis_name='batch')
@@ -243,14 +241,7 @@ def main(argv):
     plot_samples(jnp.expand_dims(predictive_variance.reshape(-1, 1), axis=0), image_size=config.data.image_size, num_channels=config.data.num_channels, fname="analytic_target_variance")
 
     stack_samples = False
-    # logspace_max = 4
-    # logspace_min = 1
-    # batch_sizes = jnp.array([480, 960, 1920, 3840])
-    # batch_sizes = jnp.array([4, 16, 25, 36, 49, 64, 100, 121, 144])
     batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
-    # batch_sizes = jnp.array([753, 1500])
-    # batch_sizes = jnp.array([16, 25, 36])
-    # batch_sizes = jnp.array([config.eval.batch_size])
     num_repeats = 3
 
     ds_target = np.zeros((batch_sizes.size, num_repeats))
