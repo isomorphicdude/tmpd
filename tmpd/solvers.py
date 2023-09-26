@@ -244,7 +244,7 @@ class PiGDMVP(DDIMVP):
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = 1 + self.noise_std**2 / r
+        C_yy = 1. + self.noise_std**2 / r
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return x_0.reshape(self.shape), ls.reshape(self.shape), epsilon.reshape(self.shape)
 
@@ -254,7 +254,8 @@ class PiGDMVP(DDIMVP):
         sqrt_1m_alpha = self.sqrt_1m_alphas_cumprod[timestep]
         v = sqrt_1m_alpha**2
         alpha = m**2
-        x_0, ls, epsilon = self.batch_analysis(x, t, timestep, v)
+        r = v / (1 + v)
+        x_0, ls, epsilon = self.batch_analysis(x, t, timestep, r)
         m_prev = self.sqrt_alphas_cumprod_prev[timestep]
         v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
         alpha_prev = m_prev**2
@@ -267,12 +268,12 @@ class PiGDMVP(DDIMVP):
 
 class PiGDMVPplus(PiGDMVP):
     """PiGDMVP with a mask."""
-    def analysis(self, x, t, timestep, v):
+    def analysis(self, x, t, timestep, r):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = 1. + self.noise_std**2 / v
+        C_yy = 1. + self.noise_std**2 / r
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return x_0.reshape(self.shape), ls.reshape(self.shape), epsilon.reshape(self.shape)
 

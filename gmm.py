@@ -319,7 +319,7 @@ def main(argv):
 
                 pd.DataFrame.from_records(dists_infos).to_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std), float_format='%.3f')
 
-            data = pd.read_csv(workdir + '{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std))
+            data = pd.read_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std))
             agg_data = data.groupby(['dim', 'dim_y', 'num_steps', 'algorithm', 'distance_name']).distance.apply(lambda x: f'{np.nanmean(x):.1f} ± {1.96 * np.nanstd(x) / (x.shape[0]**.5):.1f}').reset_index()
 
             agg_data_sw = agg_data.loc[agg_data.distance_name == 'sw'].pivot(index=('dim', 'dim_y', 'num_steps'), columns='algorithm', values=['distance']).reset_index()
@@ -328,7 +328,7 @@ def main(argv):
             for col in agg_data_sw.columns:
                 if col not in ['dim', 'dim_y', 'num_steps']:
                     agg_data_sw[col + '_num'] = agg_data_sw[col].apply(lambda x: float(x.split(" ± ")[0]))
-            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.noise_std))
+            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '/{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.noise_std))
 
 
 if __name__ == "__main__":

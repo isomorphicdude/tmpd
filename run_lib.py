@@ -302,15 +302,15 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    'KGDMVPplus',
-                    'KPDDPMplus',
+                    # 'KGDMVPplus',
+                    # 'KPDDPMplus',
                     'PiGDMVPplus',
-                    'DPSDDPMplus',
+                    # 'DPSDDPMplus',
                     'Song2023plus',
-                    'Boys2023ajacrevplus',
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',
-                    'chung2022plus',
+                    # 'Boys2023ajacrevplus',
+                    # 'Boys2023bvjpplus',
+                    # 'chung2022scalarplus',
+                    # 'chung2022plus',
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)

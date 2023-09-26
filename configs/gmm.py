@@ -30,7 +30,7 @@ def get_config():
     # sampling
     sampling = config.sampling
     sampling.cs_method = None
-    sampling.noise_std = 1.0
+    sampling.noise_std = 0.01
     sampling.denoise = True  # work out what denoise_override is
     sampling.innovation = True  # this will probably be superceded
     sampling.inverse_scaler = None
