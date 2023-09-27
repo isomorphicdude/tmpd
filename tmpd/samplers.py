@@ -13,7 +13,8 @@ from tmpd.inverse_problems import (
     get_vjp_approximate_posterior,
     get_jvp_approximate_posterior,
     get_vjp_approximate_posterior_plus,
-    get_diag_approximate_posterior)
+    get_diag_approximate_posterior,
+    get_diag_jacfwd_approximate_posterior)
 from diffusionjax.solvers import EulerMaruyama
 from tmpd.solvers import (
     DPSDDPM, DPSDDPMplus,
@@ -119,6 +120,11 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='boys2023b':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
         score = model
         posterior_score = jit(vmap(get_diag_approximate_posterior(
+            sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))
+        sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
+    elif config.sampling.cs_method.lower()=='boys2023bjacfwd':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
+        score = model
+        posterior_score = jit(vmap(get_diag_jacfwd_approximate_posterior(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='boys2023bvjpplus':

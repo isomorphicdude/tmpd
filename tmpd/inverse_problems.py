@@ -144,9 +144,9 @@ def get_diffusion_posterior_sampling_plus(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
         variance_estimate = jnp.linalg.norm(innovation)**2
-        # Cyy = noise_std**2
-        Cyy = variance_estimate  # TODO: remove this
-        ls = innovation / Cyy
+        # C_yy = noise_std**2
+        C_yy = variance_estimate  # TODO: remove this
+        ls = innovation / C_yy
         ls = vjp_estimate_h_x_0(ls)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -168,8 +168,8 @@ def get_diffusion_posterior_sampling(
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
-        Cyy = noise_std**2
-        f = innovation / Cyy
+        C_yy = noise_std**2
+        f = innovation / C_yy
         ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -218,8 +218,8 @@ def get_linear_inverse_guidance_plus(
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
-        Cyy = model_variance(t) + noise_std**2
-        f = innovation / Cyy
+        C_yy = model_variance(t) + noise_std**2
+        f = innovation / C_yy
         ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -240,8 +240,8 @@ def get_linear_inverse_guidance(
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
-        Cyy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])
-        f = jnp.linalg.solve(Cyy, innovation)
+        C_yy = model_variance(t) * HHT + noise_std**2 * jnp.eye(y.shape[0])
+        f = jnp.linalg.solve(C_yy, innovation)
         ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -261,14 +261,36 @@ def get_diag_approximate_posterior(sde, score, shape, y, noise_std, observation_
         h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         grad_H_x_0 = jacrev(lambda _x: estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = batch_observation_map(grad_H_x_0)
-        Cyy = ratio(t) * jnp.diag(H_grad_H_x_0) + noise_std**2
+        C_yy = ratio(t) * jnp.diag(H_grad_H_x_0) + noise_std**2
         innovation = y - h_x_0
-        f = innovation / Cyy
+        f = innovation / C_yy
         ls = grad_H_x_0.T @ f
         posterior_score = s + ls
         return posterior_score.reshape(shape)
 
     return approx_posterior_score
+
+
+def get_diag_jacfwd_approximate_posterior(sde, score, shape, y, noise_std, observation_map):
+    """Use a diagonal approximation to the variance inside the likelihood,
+    This produces similar results when the covariance is approximately diagonal
+    """
+    ratio = get_ratio(sde)
+    batch_observation_map = vmap(observation_map)
+    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
+    def approx_posterior_score(x, t):
+        x = x.flatten()
+        h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        H_grad_x_0 = jacfwd(lambda _x: estimate_h_x_0(_x, t)[0])(x)
+        H_grad_H_x_0 = batch_observation_map(H_grad_x_0)
+        C_yy = ratio(t) * jnp.diag(H_grad_H_x_0) + noise_std**2
+        f = (y - h_x_0) / C_yy
+        ls = H_grad_x_0.T @ f
+        posterior_score = s + ls
+        return posterior_score.reshape(shape)
+
+    return approx_posterior_score
+
 
 
 def get_jvp_approximate_posterior(
@@ -287,9 +309,9 @@ def get_jvp_approximate_posterior(
         h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         H_grad_x_0 = jacfwd(lambda _x: estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = batch_observation_map(H_grad_x_0)
-        Cyy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
+        C_yy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
         innovation = y - h_x_0
-        f = jnp.linalg.solve(Cyy, innovation)
+        f = jnp.linalg.solve(C_yy, innovation)
         ls = H_grad_x_0.T @ f
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -312,9 +334,9 @@ def get_vjp_approximate_posterior(
             lambda x: estimate_x_0(x, t), x, has_aux=True)
         vec_vjp_x_0 = vmap(vjp_x_0)
         H_grad_x_0 = vec_vjp_x_0(H)[0]
-        Cyy = ratio(t) * H @ H_grad_x_0.T + noise_std**2 * jnp.eye(y.shape[0])
+        C_yy = ratio(t) * H @ H_grad_x_0.T + noise_std**2 * jnp.eye(y.shape[0])
         innovation = y - H @ x_0
-        f = jnp.linalg.solve(Cyy, innovation)
+        f = jnp.linalg.solve(C_yy, innovation)
         ls = vjp_x_0(H.T @ f)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -338,9 +360,9 @@ def get_vjp_approximate_posterior_plus(
         h_x_0, vjp_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         diag = vjp_h_x_0(observation_map(jnp.ones(x.shape[0])))[0]
-        Cyy = ratio(t) * diag + noise_std**2
+        C_yy = ratio(t) * diag + noise_std**2
         innovation = y - h_x_0
-        ls = innovation / Cyy
+        ls = innovation / C_yy
         ls = vjp_h_x_0(ls)[0]
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -363,9 +385,9 @@ def get_jacrev_approximate_posterior(
         h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         grad_H_x_0 = jacrev(lambda _x: estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = batch_observation_map(grad_H_x_0)
-        Cyy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
+        C_yy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
         innovation = y - h_x_0
-        f = jnp.linalg.solve(Cyy, innovation)
+        f = jnp.linalg.solve(C_yy, innovation)
         ls = grad_H_x_0.T @ f
         posterior_score = s + ls
         return posterior_score.reshape(shape)
@@ -381,8 +403,6 @@ def get_jacfwd_approximate_posterior(
     Computes using d_y jvps.
     """
     ratio = get_ratio(sde)
-    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
-    ratio = get_ratio(sde)
     batch_observation_map = vmap(observation_map)
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
     def approx_posterior_score(x, t):
@@ -390,9 +410,9 @@ def get_jacfwd_approximate_posterior(
         h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         H_grad_x_0 = jacfwd(lambda _x: estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = batch_observation_map(H_grad_x_0)
-        Cyy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
+        C_yy = ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
         innovation = y - h_x_0
-        f = jnp.linalg.solve(Cyy, innovation)
+        f = jnp.linalg.solve(C_yy, innovation)
         ls = H_grad_x_0.T @ f
         posterior_score = s + ls
         return posterior_score.reshape(shape)

@@ -204,22 +204,18 @@ def main(argv):
     y_data = y.copy()
     X_data = X[idx_obs, :]
 
-    def observation_map(x):
-        return H @ x
-
-    def adjoint_observation_map(y):
-        return H.T @ y
 
     if 'plus' in config.sampling.cs_method:
-        mask = True
-    else:
-        mask = None
-
-    if mask is not None:
         mask = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         mask = mask.at[idx_obs].set(1.0)
         y = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         y = y.at[idx_obs].set(y_data)
+        observation_map = lambda x: mask * x
+        adjoint_observation_map = lambda y: y
+    else:
+        observation_map = lambda x: H @ x
+        adjoint_observation_map = lambda y: H.T @ y
+        mask = None
 
     def prior(prior_parameters):
         lengthscale, signal_variance = prior_parameters
@@ -242,7 +238,7 @@ def main(argv):
 
     stack_samples = False
     # batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
-    batch_sizes = jnp.array([9])
+    batch_sizes = jnp.array([1500])
     num_repeats = 1
 
     ds_target = np.zeros((batch_sizes.size, num_repeats))

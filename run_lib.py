@@ -72,8 +72,7 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
 
-    x = q_samples[0].flatten()
-    return x
+    return q_samples[0]
 
 
 def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
@@ -100,16 +99,22 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
 
-  x = eval_batch['image'][0, 0].flatten()
-  return x
+  return eval_batch['image'][0, 0]
 
 
-def get_observation(rng, x, config, mask_name='square'):
+def get_inpainting_observation(rng, x, config, mask_name='square'):
   " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
   mask, num_obs = get_mask(config.data.image_size, mask_name)
   y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
   y = y * mask
   return y, mask, num_obs
+
+
+def get_superresolution_observation(rng, x, config, shape, method='square'):
+  y = jax.image.resize(x, shape, method)
+  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+  num_obs = jnp.size(y)
+  return y, num_obs
 
 
 def image_grid(x, image_size, num_channels):
@@ -140,10 +145,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
 
   rng = jax.random.PRNGKey(config.seed + 1)
 
-  # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
-  inverse_scaler = datasets.get_data_inverse_scaler(config)
-
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
@@ -160,13 +161,62 @@ def super_resolution(config, workdir, eval_folder="eval"):
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    sampling_eps = 1e-3
-  elif config.training.sde.lower() == 'subvpsde':
-    # sampling_eps = 1e-3
-    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
+    # sampling_eps = 1e-3  # TODO: add this in numerical solver
+    if 'plus' not in config.sampling.cs_method:
+      # VP/DDPM Methods with matrix H
+      cs_methods = [
+                    'Boys2023avjp',
+                    'Boys2023b',
+                    'Song2023',
+                    # 'Chung2022',  # Unstable
+                    'PiGDMVP',
+                    'KGDMVP',
+                    'KPDDPM'
+                    'DPSDDPM']
+    else:
+      # VP/DDM methods with mask
+      cs_methods = [
+                    # 'KGDMVPplus',
+                    # 'KPDDPMplus',
+                    # 'PiGDMVPplus',
+                    # 'DPSDDPMplus',
+                    # 'Song2023plus',
+                    # 'Boys2023ajacrevplus',
+                    'Boys2023ajacfwd',
+                    'Boys2023b',
+                    # 'Boys2023bvjpplus',
+                    # 'chung2022scalarplus',  # Unstable
+                    # 'chung2022plus',  # Unstable
+                    ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    sampling_eps = 1e-5
+    # sampling_eps = 1e-5  # TODO: add this in numerical solver
+    if 'plus' not in config.sampling.cs_method:
+      # VE/SMLD Methods with matrix H
+      cs_methods = [
+                    'Boys2023ajvp',
+                    'Boys2023b',
+                    'Song2023',
+                    # 'Chung2022',  # Unstable
+                    'PiGDMVE',
+                    'KGDMVE',
+                    'KPSMLD'
+                    'DPSSMLD']
+    else:
+      # VE/SMLD methods with mask
+      cs_methods = [
+                    # 'KGDMVEplus',
+                    # 'KPSMLDplus',
+                    # 'PiGDMVEplus',
+                    # 'DPSSMLDplus',
+                    # 'Song2023plus',
+                    # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
+                    'Boys2023b',  # OOM, but can try on batch_size=1
+                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
+                    # 'Boys2023bvjpplus',
+                    # 'chung2022scalarplus',  # Unstable
+                    # 'chung2022plus',  # Unstable
+                    ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
@@ -174,26 +224,21 @@ def super_resolution(config, workdir, eval_folder="eval"):
   rng = jax.random.fold_in(rng, jax.host_id())
 
   ckpt = config.eval.begin_ckpt
-  # Wait if the target checkpoint doesn't exist yet
-  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
 
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Get model state from checkpoint file
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-  if config.solver.outer_solver in unconditional_ddim_methods:
-    outer_solver = get_ddim_chain(config, epsilon_fn)
-  elif config.solver.outer_solver in unconditional_markov_methods:
-    outer_solver = get_markov_chain(config, score_fn)
-  else:
-    # rsde = sde.reverse(score_fn)
-    # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
-    outer_solver, _ = get_solver(config, sde, score_fn)
 
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
@@ -202,45 +247,85 @@ def super_resolution(config, workdir, eval_folder="eval"):
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
 
-  sampler = get_sampler(
-    sampling_shape,
-    outer_solver, inverse_scaler=None)
+  obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
 
-  if config.eval.pmap:
-    sampler = jax.pmap(sampler, axis_name='batch')
-    rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-    sample_rng = jnp.asarray(sample_rng)
-  else:
-    rng, sample_rng = jax.random.split(rng, 2)
+  num_examples = 10
+  xs = []
+  ys = []
+  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
+    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
+    noise_std=config.sampling.noise_std)
+  for i in range(num_examples):
+    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
+    x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    y, num_obs = get_superresolution_observation(
+      rng, x, config, obs_shape, method='nearest')
+    plot_samples(
+      inverse_scaler(x.copy()),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_ground_{}_{}".format(
+        config.data.dataset, config.solver.outer_solver, i))
+    plot_samples(
+      inverse_scaler(mask_y.copy()),
+      image_size=obs_shape[1],
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_observed_{}_{}".format(
+        config.data.dataset, config.solver.outer_solver, i))
+    assert 0
+    xs.append(x)
+    ys.append(y)
+    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
+      xs=jnp.array(xs), ys=jnp.array(ys))
 
-  q_samples, _ = sampler(sample_rng)
-  q_images = inverse_scaler(q_samples.copy())
-  q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+    if 'plus' not in config.sampling.cs_method:
+      logging.warning(
+        "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
+          (num_obs, config.data.image_size**2 * config.data.num_channels)))
+      idx_obs = np.nonzero(mask)[0]
+      H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
+      ogrid = np.arange(num_obs, dtype=int)
+      H = H.at[ogrid, idx_obs].set(1.0)
+      y = H @ mask_y
+      observation_map = None
+      adjoint_observation_map = None
+    else:
+      y = mask_y
+      observation_map = lambda x: mask * x
+      adjoint_observation_map = lambda y: y
+      H = None
 
-  plot_samples(
-    inverse_scaler(q_images),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
+    cs_method = config.sampling.cs_method
 
-  plot_samples(
-    inverse_scaler(q_images[0]),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
-  x = q_samples[0]
+    num_repeats = 10
+    for j in range(num_repeats):
+      for cs_method in cs_methods:
+        config.sampling.cs_method = cs_method
+        if cs_method in ddim_methods:
+          sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+        else:
+          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-  scale_factor = 2.
-  observation_map = Resizer(sampling_shape[1:], 1. / scale_factor)
-  print("x shape", x.shape, "sampling_shape", sampling_shape[1:])
-  y = observation_map(x)
-  print("y shape", y.shape)
-  plot_samples(
-    inverse_scaler(y),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_observed_{}".format(
-      config.data.dataset, config.solver.outer_solver))
+        rng, sample_rng = jax.random.split(rng, 2)
+        if config.eval.pmap:
+          # sampler = jax.pmap(sampler, axis_name='batch')
+          rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+          sample_rng = jnp.asarray(sample_rng)
+        else:
+          rng, sample_rng = jax.random.split(rng, 2)
+
+        q_samples, nfe = sampler(sample_rng)
+        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+        print(q_samples, "\nconfig.sampling.cs_method")
+        plot_samples(
+          q_samples,
+          image_size=config.data.image_size,
+          num_channels=config.data.num_channels,
+          fname=eval_folder + "/{}_{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i, j))
+  assert 0
 
 
 def inverse_problem(config, workdir, eval_folder="eval"):
@@ -322,6 +407,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                     # 'Song2023plus',
                     # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
                     'Boys2023b',  # OOM, but can try on batch_size=1
+                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
                     # 'Boys2023bvjpplus',
                     # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
@@ -365,7 +451,8 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   for i in range(num_examples):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
     x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    mask_y, mask, num_obs = get_observation(rng, x, config, mask_name='half')
+    x = x.flatten()
+    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
