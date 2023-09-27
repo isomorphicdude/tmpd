@@ -12,6 +12,7 @@ FG_ALPHA = 0.3
 color_posterior = '#a2c4c9'
 color_algorithm = '#ff7878'
 dpi_val = 1200
+cmap = 'magma'
 
 
 def plot_single_image(noise_std, dim, dim_y, timesteps, i, name, indices, samples, color=color_algorithm):
@@ -72,7 +73,7 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     img = image_grid(x, image_size, num_channels)
     plt.figure(figsize=(8,8))
     plt.axis('off')
-    plt.imshow(img)
+    plt.imshow(img, cmap=cmap)
     plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
     plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
     plt.close()

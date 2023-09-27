@@ -97,7 +97,7 @@ def get_config():
   eval = config.eval
   eval.begin_ckpt = 8  # 12
   eval.end_ckpt = 8  # 12
-  eval.batch_size = 4
+  eval.batch_size = 1
   eval.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'

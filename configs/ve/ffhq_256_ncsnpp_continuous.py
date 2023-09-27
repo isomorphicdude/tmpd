@@ -92,7 +92,7 @@ def get_config():
   # sampling.cs_method = 'DPSSMLDplus'
   sampling.cs_method = 'plus'
 
-  sampling.noise_std = 0.1
+  sampling.noise_std = 0.01
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
@@ -100,7 +100,7 @@ def get_config():
   evaluate = config.eval
   evaluate.begin_ckpt = 48
   evaluate.end_ckpt = 48
-  evaluate.batch_size = 1
+  evaluate.batch_size = 4
   evaluate.pmap = False
   solver = config.solver
   solver.num_outer_steps = config.model.num_scales

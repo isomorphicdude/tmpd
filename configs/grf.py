@@ -13,13 +13,13 @@ def get_config():
     solver = config.solver
 
     # profiling arguments
-    # sampling.cs_method = 'Boys2023avjp'
+    sampling.cs_method = 'Boys2023avjp'
     # sampling.cs_method = 'Boys2023ajvp'
     # sampling.cs_method = 'Boys2023ajacrev'
     # sampling.cs_method = 'Boys2023ajacfwd'
     # sampling.cs_method = 'Boys2023b'
     # sampling.cs_method = 'Song2023'
-    sampling.cs_method = 'Chung2022'
+    # sampling.cs_method = 'Chung2022'
 
     # mask methods
     # sampling.cs_method = 'Song2023plus'

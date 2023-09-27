@@ -170,87 +170,77 @@ def super_resolution(config, workdir, eval_folder="eval"):
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
-  input_shape = (
-    num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
-
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  begin_ckpt = config.eval.begin_ckpt
+  ckpt = config.eval.begin_ckpt
+  # Wait if the target checkpoint doesn't exist yet
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
 
-  logging.info("begin checkpoint: %d" % (begin_ckpt,))
-  print("begin checkpoint: {}".format(begin_ckpt))
-  print("end checkpoint: {}".format(config.eval.end_ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
 
-  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
-    # Wait if the target checkpoint doesn't exist yet
-    waiting_message_printed = False
-    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    if not tf.io.gfile.exists(ckpt_filename):
-      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  epsilon_fn = mutils.get_epsilon_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  if config.solver.outer_solver in unconditional_ddim_methods:
+    outer_solver = get_ddim_chain(config, epsilon_fn)
+  elif config.solver.outer_solver in unconditional_markov_methods:
+    outer_solver = get_markov_chain(config, score_fn)
+  else:
+    # rsde = sde.reverse(score_fn)
+    # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
+    outer_solver, _ = get_solver(config, sde, score_fn)
 
-    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+  batch_size = config.eval.batch_size
+  print("\nbatch_size={}".format(batch_size))
+  sampling_shape = (
+    config.eval.batch_size//num_devices,
+    config.data.image_size, config.data.image_size, config.data.num_channels)
+  print("sampling shape", sampling_shape)
 
-    epsilon_fn = mutils.get_epsilon_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-    score_fn = mutils.get_score_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-    if config.solver.outer_solver in unconditional_ddim_methods:
-      outer_solver = get_ddim_chain(config, epsilon_fn)
-    elif config.solver.outer_solver in unconditional_markov_methods:
-      outer_solver = get_markov_chain(config, score_fn)
-    else:
-      # rsde = sde.reverse(score_fn)
-      # outer_solver = EulerMaruyama(rsde, num_steps=config.model.num_scales)
-      outer_solver, _ = get_solver(config, sde, score_fn)
- 
-    batch_size = config.eval.batch_size
-    print("\nbatch_size={}".format(batch_size))
-    sampling_shape = (
-      config.eval.batch_size//num_devices,
-      config.data.image_size, config.data.image_size, config.data.num_channels)
-    print("sampling shape", sampling_shape)
+  sampler = get_sampler(
+    sampling_shape,
+    outer_solver, inverse_scaler=None)
 
-    sampler = get_sampler(
-      sampling_shape,
-      outer_solver, inverse_scaler=None)
+  if config.eval.pmap:
+    sampler = jax.pmap(sampler, axis_name='batch')
+    rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+    sample_rng = jnp.asarray(sample_rng)
+  else:
+    rng, sample_rng = jax.random.split(rng, 2)
 
-    if config.eval.pmap:
-      sampler = jax.pmap(sampler, axis_name='batch')
-      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-      sample_rng = jnp.asarray(sample_rng)
-    else:
-      rng, sample_rng = jax.random.split(rng, 2)
+  q_samples, _ = sampler(sample_rng)
+  q_images = inverse_scaler(q_samples.copy())
+  q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
 
-    q_samples, _ = sampler(sample_rng)
-    q_images = inverse_scaler(q_samples.copy())
-    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-  
-    plot_samples(
-      inverse_scaler(q_images),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
+  plot_samples(
+    inverse_scaler(q_images),
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
 
-    plot_samples(
-      inverse_scaler(q_images[0]),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
-    x = q_samples[0]
+  plot_samples(
+    inverse_scaler(q_images[0]),
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_ground_{}".format(config.data.dataset, config.solver.outer_solver))
+  x = q_samples[0]
 
-    scale_factor = 2.
-    observation_map = Resizer(sampling_shape[1:], 1. / scale_factor)
-    print("x shape", x.shape, "sampling_shape", sampling_shape[1:])
-    y = observation_map(x)
-    print("y shape", y.shape)
-    plot_samples(
-      inverse_scaler(y),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_observed_{}".format(
-        config.data.dataset, config.solver.outer_solver))
+  scale_factor = 2.
+  observation_map = Resizer(sampling_shape[1:], 1. / scale_factor)
+  print("x shape", x.shape, "sampling_shape", sampling_shape[1:])
+  y = observation_map(x)
+  print("y shape", y.shape)
+  plot_samples(
+    inverse_scaler(y),
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_observed_{}".format(
+      config.data.dataset, config.solver.outer_solver))
 
 
 def inverse_problem(config, workdir, eval_folder="eval"):
@@ -296,14 +286,16 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    'KGDMVPplus',
+                    # 'KGDMVPplus',
                     # 'KPDDPMplus',
-                    'PiGDMVPplus',
-                    'DPSDDPMplus',
-                    'Song2023plus',
+                    # 'PiGDMVPplus',
+                    # 'DPSDDPMplus',
+                    # 'Song2023plus',
                     # 'Boys2023ajacrevplus',
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',  # Unstable
+                    'Boys2023ajacfwd',
+                    'Boys2023b',
+                    # 'Boys2023bvjpplus',
+                    # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
                     ]
   elif config.training.sde.lower() == 'vesde':
@@ -323,15 +315,15 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'KGDMVEplus',
-                    'KPSMLDplus',
-                    'PiGDMVEplus',
-                    'DPSSMLDplus',
-                    'Song2023plus',
+                    # 'KGDMVEplus',
+                    # 'KPSMLDplus',
+                    # 'PiGDMVEplus',
+                    # 'DPSSMLDplus',
+                    # 'Song2023plus',
                     # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
-                    # 'Boys2023b',  # OOM, but can try on batch_size=1
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',  # Unstable
+                    'Boys2023b',  # OOM, but can try on batch_size=1
+                    # 'Boys2023bvjpplus',
+                    # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
                     ]
   else:
@@ -364,15 +356,16 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
 
-  num_examples = 1
+  num_examples = 10
   xs = []
   ys = []
   np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
     config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
     noise_std=config.sampling.noise_std)
   for i in range(num_examples):
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
-    mask_y, mask, num_obs = get_observation(rng, x, config, mask_name='square')
+    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
+    x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    mask_y, mask, num_obs = get_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -391,7 +384,6 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
       xs=jnp.array(xs), ys=jnp.array(ys))
 
-    # H = None
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
         "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
@@ -411,7 +403,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 3
+    num_repeats = 10
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
@@ -460,7 +452,7 @@ def sample(config,
   rng = jax.random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
+  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
@@ -497,46 +489,40 @@ def sample(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  begin_ckpt = config.eval.begin_ckpt
+  ckpt = config.eval.begin_ckpt
 
-  logging.info("begin checkpoint: %d" % (begin_ckpt,))
-  print("begin checkpoint: {}".format(begin_ckpt))
-  print("end checkpoint: {}".format(config.eval.end_ckpt))
+  # Wait if the target checkpoint doesn't exist yet
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
 
-  for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
-    # Wait if the target checkpoint doesn't exist yet
-    waiting_message_printed = False
-    ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
 
-    if not tf.io.gfile.exists(ckpt_filename):
-      raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
-    state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-    score_fn = mutils.get_score_fn(
-      sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  # is score fn a vectorized function? yes
 
-    # is score fn a vectorized function? yes
+  rsde = sde.reverse(score_fn)
+  drift, diffusion = rsde.sde(x_0, t_0)
+  print(drift.shape)
+  print(diffusion.shape)
+  print(drift[0, 0, 0, 0])
+  print(drift[-1, -1, -1, -1])
+  print(jnp.sum(drift))
+  print(diffusion[0])
 
-    rsde = sde.reverse(score_fn)
-    drift, diffusion = rsde.sde(x_0, t_0)
-    print(drift.shape)
-    print(diffusion.shape)
-    print(drift[0, 0, 0, 0])
-    print(drift[-1, -1, -1, -1])
-    print(jnp.sum(drift))
-    print(diffusion[0])
-
-    sampler = get_sampler(
-      (4, config.data.image_size, config.data.image_size, config.data.num_channels),
-      EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
-    q_samples, num_function_evaluations = sampler(rng)
-    print("num_function_evaluations", num_function_evaluations)
-    q_samples = inverse_scaler(q_samples)
-    print(q_samples.shape)
-    plot_samples(
-      q_samples,
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname="{} samples".format(config.data.dataset))
+  sampler = get_sampler(
+    (4, config.data.image_size, config.data.image_size, config.data.num_channels),
+    EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
+  q_samples, num_function_evaluations = sampler(rng)
+  print("num_function_evaluations", num_function_evaluations)
+  q_samples = inverse_scaler(q_samples)
+  print(q_samples.shape)
+  plot_samples(
+    q_samples,
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname="{} samples".format(config.data.dataset))
 
