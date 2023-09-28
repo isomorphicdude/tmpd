@@ -117,6 +117,13 @@ def get_superresolution_observation(rng, x, config, shape, method='square'):
   return y, num_obs
 
 
+def get_():
+  x = jnp.linspace(-3, 3, 7)
+  window = jsp.stats.norm.pdf(x) * jsp.stats.norm.pdf(x[:, None])
+  smooth_image = jsp.signal.convolve(noisy_image, window, mode='same')
+  return y, num_obs
+
+
 def image_grid(x, image_size, num_channels):
     img = x.reshape(-1, image_size, image_size, num_channels)
     w = int(np.sqrt(img.shape[0]))
@@ -182,8 +189,9 @@ def super_resolution(config, workdir, eval_folder="eval"):
                     # 'DPSDDPMplus',
                     # 'Song2023plus',
                     # 'Boys2023ajacrevplus',
-                    'Boys2023ajacfwd',
+                    # 'Boys2023ajacfwd',
                     'Boys2023b',
+                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
                     # 'Boys2023bvjpplus',
                     # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
@@ -360,8 +368,10 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'Boys2023avjp',
+                    # 'Boys2023avjp',  # Unstable
                     'Boys2023b',
+                    'Boys2023bjacfwd',
+                    'Boys2023bvjp',
                     'Song2023',
                     # 'Chung2022',  # Unstable
                     'PiGDMVP',
@@ -377,8 +387,10 @@ def inverse_problem(config, workdir, eval_folder="eval"):
                     # 'DPSDDPMplus',
                     # 'Song2023plus',
                     # 'Boys2023ajacrevplus',
-                    'Boys2023ajacfwd',
-                    'Boys2023b',
+                    # 'Boys2023ajacfwd',
+                    # 'Boys2023b',
+                    # 'Boys2023bjacfwd',
+                    'Boys2023bvjp',
                     # 'Boys2023bvjpplus',
                     # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
@@ -401,12 +413,12 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       # VE/SMLD methods with mask
       cs_methods = [
                     # 'KGDMVEplus',
-                    # 'KPSMLDplus',
+                    'KPSMLDplus',
                     # 'PiGDMVEplus',
                     # 'DPSSMLDplus',
                     # 'Song2023plus',
                     # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
-                    'Boys2023b',  # OOM, but can try on batch_size=1
+                    # 'Boys2023b',  # OOM, but can try on batch_size=1
                     # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
                     # 'Boys2023bvjpplus',
                     # 'chung2022scalarplus',  # Unstable
@@ -452,7 +464,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
     x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     x = x.flatten()
-    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -480,7 +492,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
       y = H @ mask_y
-      observation_map = None
+      observation_map = lambda x: H @ x
       adjoint_observation_map = None
     else:
       y = mask_y
@@ -511,7 +523,7 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
         q_samples, nfe = sampler(sample_rng)
         q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-        print(q_samples, "\nconfig.sampling.cs_method")
+        print(q_samples, "\n{}".format(config.sampling.cs_method))
         plot_samples(
           q_samples,
           image_size=config.data.image_size,

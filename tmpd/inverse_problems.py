@@ -271,6 +271,32 @@ def get_diag_approximate_posterior(sde, score, shape, y, noise_std, observation_
     return approx_posterior_score
 
 
+def get_diag_vjp_approximate_posterior(sde, score, shape, y, noise_std, H):
+    """Use a diagonal approximation to the variance inside the likelihood,
+    This produces similar results when the covariance is approximately diagonal
+    """
+    ratio = get_ratio(sde)
+    observation_map = lambda x: H @ x
+    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
+    def approx_posterior_score(x, t):
+        x = x.flatten()
+        h_x_0, vjp_estimate_h_x_0, s = vjp(
+            lambda x: estimate_h_x_0(x, t), x, has_aux=True)
+        diag_vjp = vmap(lambda h: jnp.dot(vjp_estimate_h_x_0(h)[0], h))
+        diag_H_grad_H_x_0 = diag_vjp(H.T)
+        print(diag_H_grad_H_x_0.shape)
+        assert 0
+        H_grad_H_x_0 = batch_observation_map(grad_H_x_0)
+        C_yy = ratio(t) * diag_H_grad_H_x_0 + noise_std**2
+        innovation = y - h_x_0
+        f = innovation / C_yy
+        ls = grad_H_x_0.T @ f
+        posterior_score = s + ls
+        return posterior_score.reshape(shape)
+
+    return approx_posterior_score
+
+
 def get_diag_jacfwd_approximate_posterior(sde, score, shape, y, noise_std, observation_map):
     """Use a diagonal approximation to the variance inside the likelihood,
     This produces similar results when the covariance is approximately diagonal

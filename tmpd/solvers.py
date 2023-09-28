@@ -356,7 +356,7 @@ DPSDDPMplus = DPSDDPM
 
 
 class KPDDPM(DDPM):
-    """Kalman posterior for DDPM Ancestral sampling. TODO: needs debugging"""
+    """Kalman posterior for DDPM Ancestral sampling."""
     def __init__(self, y, observation_map, noise_std, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
         super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
         self.y = y
@@ -377,7 +377,6 @@ class KPDDPM(DDPM):
         innovation = self.y - h_x_0
         f = jnp.linalg.solve(Cyy, innovation)
         ls = grad_H_x_0.T @ f
-        # posterior_score = s + ls / ratio
         return (x_0 + ls).reshape(self.shape)
 
     def posterior(self, x, t):
@@ -403,7 +402,7 @@ class KPDDPM(DDPM):
 
 
 class KPDDPMplus(KPDDPM):
-    """Kalman posterior for DDPM Ancestral sampling. TODO: needs debugging"""
+    """Kalman posterior for DDPM Ancestral sampling."""
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
@@ -411,20 +410,19 @@ class KPDDPMplus(KPDDPM):
             _estimate_h_x_0, x, has_aux=True)
         C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
-        # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 
 
 class KPSMLD(SMLD):
-    """Kalman posterior for DDPM Ancestral sampling. TODO: needs debugging"""
+    """Kalman posterior for DDPM Ancestral sampling."""
     def __init__(self, y, observation_map, noise_std, shape, score, num_steps=1000, dt=None, epsilon=None, sigma_min=0.01, sigma_max=378.):
         super().__init__(score, num_steps, dt, epsilon, sigma_min, sigma_max)
         self.y = y
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimat_x_0 = self.get_estimate_x_0(shape, lambda x: x)
+        # self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
@@ -438,8 +436,6 @@ class KPSMLD(SMLD):
         innovation = self.y - h_x_0
         f = jnp.linalg.solve(Cyy, innovation)
         ls = grad_H_x_0.T @ f
-        # C_yy = 1. + self.noise_std**2 / v
-        # ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 
     def posterior(self, x, t):
@@ -462,16 +458,17 @@ class KPSMLD(SMLD):
 class KPSMLDplus(KPSMLD):
     """
     Kalman posterior for DDPM Ancestral sampling.
-    TODO: Intermittently stable on FFHQ and CelebA. Increasing noise_std makes more stable.
-    TODO: needs debugging. Try taking vjp of ratio * x_0, may be more stable? Or using epsilon network?"""
+    """
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
-        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
-        h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
-            _estimate_h_x_0, x, has_aux=True)
-        C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
-        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
-        # C_yy = 1 + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_h_0((self.y - h_x_0) / C_yy)[0]
+        # _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
+        _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
+        # h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
+        #     _estimate_h_x_0, x, has_aux=True)
+        x_0, vjp_estimate_x_0, (score, x_0) = vjp(
+            _estimate_x_0, x, has_aux=True)
+        C_yy = self.observation_map(vjp_estimate_x_0((jnp.ones_like(x)))) + self.noise_std**2 / ratio
+        # C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
+        ls = vjp_estimate_x_0((self.y - self.observation_map(x_0)) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 
