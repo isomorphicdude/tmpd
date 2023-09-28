@@ -7,7 +7,7 @@ Contents:
 - [Experiments](#experiments)
     - [Gaussian](#gaussian)
     - [Gaussian Mixture Model](#gmm)
-    - [Noisy inpainting and super resolution](#noisy-inpainting-and-super-resolution)
+    - [Noisy inpainting, super resolution and deblur](#noisy-inpainting,-super-resolution-and-deblur)
 - [References](#references)
 
 ## Installation
@@ -43,7 +43,7 @@ python gmm.py:
     (default: './workdir')
 ```
 
-### Noisy inpainting and super resolution
+### Noisy inpainting, super resolution and deblur
 
 First, download the checkpoints and place them into an `exp/` folder in the working directory of this README file.
 
@@ -51,14 +51,14 @@ You will require the pre-trained model checkpoints to access the score models. A
 
 Please note that if for any reason you need to download the CelebAHQ and/or FFHQ datasets, you will need to manually download them using these [instructions](https://github.com/tkarras/progressive_growing_of_gans#preparing-datasets-for-training). 
 
-Reproduce our inpainting or superresolution experiments through `main.py`.
+Reproduce our inpainting, super_resolution and deblur experiments through `main.py`.
 ```sh
 python main.py:
   --config: Configuration.
     (default: 'None')
   --eval_folder: The folder name for storing evaluation results
     (default: 'eval')
-  --mode: <inpainting|superresolution>: Running mode: inpainting or superresolution
+  --mode: <inpainting|super_resolution|deblur>: Running mode: inpainting, super_resolution or deblur
   --workdir: Working directory
 ```
 
@@ -68,7 +68,7 @@ python main.py:
 
 * `eval_folder` is the name of a subfolder in `workdir` that stores all artifacts of the evaluation process, like image samples, and numpy dumps of quantitative results.
 
-* `mode` is either "inpainting" or "superresolution". When set to "inpainting", it performs an inpainting experiment. When set to "superresolution", it performs the super-resolution experiment.
+* `mode` is either "inpainting", "super_resolution" or "deblur". When set to {"inpainting", "super_resolution", "deblur"}, it performs an {inpainting, super resolution, deblur} experiment.
 
 The experimental setup can be configured through the config file and the experimental parameters within `run_lib.py`.
 
