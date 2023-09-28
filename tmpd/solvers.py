@@ -422,8 +422,8 @@ class KPSMLD(SMLD):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimat_x_0 = self.get_estimate_x_0(shape, lambda x: x)
-        # self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        # self.estimat_x_0 = self.get_estimate_x_0(shape, lambda x: x)
+        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)

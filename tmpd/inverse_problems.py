@@ -284,13 +284,10 @@ def get_diag_vjp_approximate_posterior(sde, score, shape, y, noise_std, H):
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         diag_vjp = vmap(lambda h: jnp.dot(vjp_estimate_h_x_0(h)[0], h))
         diag_H_grad_H_x_0 = diag_vjp(H.T)
-        print(diag_H_grad_H_x_0.shape)
-        assert 0
-        H_grad_H_x_0 = batch_observation_map(grad_H_x_0)
         C_yy = ratio(t) * diag_H_grad_H_x_0 + noise_std**2
         innovation = y - h_x_0
         f = innovation / C_yy
-        ls = grad_H_x_0.T @ f
+        ls = vjp_estimate_h_x_0(f)
         posterior_score = s + ls
         return posterior_score.reshape(shape)
 

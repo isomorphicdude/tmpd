@@ -177,7 +177,7 @@ def deblur(config, workdir, eval_folder="eval"):
                     'Boys2023avjp',
                     'Boys2023b',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  # Unstable
                     'PiGDMVP',
                     'KGDMVP',
                     'KPDDPM'
@@ -189,7 +189,7 @@ def deblur(config, workdir, eval_folder="eval"):
                     # 'KPDDPMplus',
                     # 'PiGDMVPplus',
                     # 'DPSDDPMplus',
-                    # 'Song2023plus',
+                    'Song2023plus',
                     # 'Boys2023ajacrevplus',
                     # 'Boys2023ajacfwd',
                     # 'Boys2023b',
