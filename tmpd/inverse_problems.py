@@ -385,7 +385,7 @@ def get_vjp_approximate_posterior_plus(
         x = x.flatten()
         h_x_0, vjp_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
-        diag = vjp_h_x_0(observation_map(jnp.ones(x.shape[0])))[0]
+        diag = observation_map(vjp_h_x_0(observation_map(jnp.ones(x.shape[0])))[0])
         C_yy = ratio(t) * diag + noise_std**2
         innovation = y - h_x_0
         ls = innovation / C_yy

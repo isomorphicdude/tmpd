@@ -54,7 +54,7 @@ class KGDMVPplus(KGDMVP):
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = ratio * vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2
+        C_yy = ratio * self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
@@ -108,7 +108,7 @@ class KGDMVEplus(KGDMVE):
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = v * vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2
+        C_yy = v * self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
@@ -408,7 +408,8 @@ class KPDDPMplus(KPDDPM):
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
+        C_yy = self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
+        # C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 
@@ -461,14 +462,16 @@ class KPSMLDplus(KPSMLD):
     """
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
-        # _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
-        _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
-        # h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
-        #     _estimate_h_x_0, x, has_aux=True)
-        x_0, vjp_estimate_x_0, (score, x_0) = vjp(
-            _estimate_x_0, x, has_aux=True)
-        C_yy = self.observation_map(vjp_estimate_x_0((jnp.ones_like(x)))) + self.noise_std**2 / ratio
-        # C_yy = vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0] + self.noise_std**2 / ratio
-        ls = vjp_estimate_x_0((self.y - self.observation_map(x_0)) / C_yy)[0]
+        # SS
+        # _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
+        # x_0, vjp_estimate_x_0, (score, x_0) = vjp(
+        #     _estimate_x_0, x, has_aux=True)
+        # C_yy = self.observation_map(vjp_estimate_x_0((jnp.ones_like(x)))) + self.noise_std**2 / ratio
+        # ls = vjp_estimate_x_0((self.y - self.observation_map(x_0)) / C_yy)[0]
+        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
+        h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
+            _estimate_h_x_0, x, has_aux=True)
+        C_yy = self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
+        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
 

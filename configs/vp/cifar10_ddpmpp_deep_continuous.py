@@ -77,7 +77,7 @@ def get_config():
   # sampling.cs_method = 'ProjectionKalmanFilter'
   # sampling.cs_method = 'KPDDPM'
   # sampling.cs_method = 'KGDMVP'
-  sampling.cs_method = 'KPDDPM'
+  # sampling.cs_method = 'KPDDPM'
 
   # mask methods
   # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
@@ -88,7 +88,7 @@ def get_config():
   # sampling.cs_method = 'KPSMLDplus'
   # sampling.cs_method = 'PiGDMVPplus'
   # sampling.cs_method = 'KGDMVPplus'
-  # sampling.cs_method = 'KPDDPMplus'
+  sampling.cs_method = 'KPDDPMplus'
 
   sampling.noise_std = 0.1
   sampling.denoise = True  # work out what denoise_override is
@@ -97,12 +97,12 @@ def get_config():
   eval = config.eval
   eval.begin_ckpt = 8  # 12
   eval.end_ckpt = 8  # 12
-  eval.batch_size = 1
+  eval.batch_size = 4
   eval.pmap = False
   solver = config.solver
-  solver.outer_solver = 'eulermaruyama'
+  # solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  # solver.outer_solver = 'DDIMVP'
+  solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter
 

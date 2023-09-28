@@ -85,14 +85,14 @@ def get_config():
   # sampling.cs_method = 'KPSMLDplus'
   sampling.cs_method = 'DPSSMLDplus'
 
-  sampling.noise_std = 0.001
+  sampling.noise_std = 0.01
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 1
+  evaluate.batch_size = 4
   evaluate.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
