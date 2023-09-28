@@ -6,32 +6,6 @@ from pathlib import Path
 import jax
 
 
-def display_sample(sample):
-    image_processed = sample.cpu().permute(1, 2, 0)
-    image_processed = (image_processed + 1.0) * 127.5
-    image_processed = image_processed.numpy().astype(np.uint8)
-
-    image_pil = Image.fromarray(image_processed)
-    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-    ax.imshow(image_pil)
-    #.title(f"Image at step {i}")
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    return fig
-
-
-def save_jpg(sample, path, format='PDF'):
-    if sample.shape[0] == 3:
-        image_processed = sample.cpu().permute(1, 2, 0)
-    else:
-        image_processed = sample[0].cpu()
-    image_processed = (image_processed + 1.0) * 127.5
-    image_processed = image_processed.numpy().astype(np.uint8)
-
-    image_pil = Image.fromarray(image_processed, mode='L' if len(sample.shape)==2 else None)
-    image_pil.save(fp=path, format=format)
-    return None
-
-
 def get_mask(image_size, mask_name='square'):
     mask_file = Path(__file__).parent / Path(f'masks/{mask_name}.npy')
     mask = np.load(mask_file)

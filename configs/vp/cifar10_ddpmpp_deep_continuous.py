@@ -97,12 +97,12 @@ def get_config():
   eval = config.eval
   eval.begin_ckpt = 8  # 12
   eval.end_ckpt = 8  # 12
-  eval.batch_size = 1
+  eval.batch_size = 4
   eval.pmap = False
   solver = config.solver
-  solver.outer_solver = 'eulermaruyama'
+  # solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  # solver.outer_solver = 'DDIMVP'
+  solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter
 

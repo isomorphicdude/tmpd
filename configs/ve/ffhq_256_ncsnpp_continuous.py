@@ -67,6 +67,8 @@ def get_config():
 
 
   # TODO: BB stuff
+  # optim
+  config.seed = 23  #223
   # sampling.cs_method = 'Boys2023ajvp'  # OOM for CelebA but not for CIFAR10, but doens't work particularly well for CIFAR10
   # sampling.cs_method = 'Boys2023avjp'  # OOM for CIFAR10
   # sampling.cs_method = 'Boys2023ajac'  # OOM for CIFAR10
@@ -100,13 +102,13 @@ def get_config():
   evaluate = config.eval
   evaluate.begin_ckpt = 48
   evaluate.end_ckpt = 48
-  evaluate.batch_size = 4
+  evaluate.batch_size = 1
   evaluate.pmap = False
   solver = config.solver
   solver.num_outer_steps = config.model.num_scales
-  # solver.outer_solver = 'eulermaruyama'
+  solver.outer_solver = 'eulermaruyama'
   # solver.inner_solver = None
-  solver.outer_solver = 'DDIMVE'
+  # solver.outer_solver = 'DDIMVE'
   # solver.outer_solver = 'SMLD'
   solver.eta = 1.0  # DDIM hyperparameter
 
