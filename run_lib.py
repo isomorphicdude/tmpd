@@ -105,22 +105,24 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
 def get_inpainting_observation(rng, x, config, mask_name='square'):
   " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
   mask, num_obs = get_mask(config.data.image_size, mask_name)
-  y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+  y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)
   y = y * mask
   return y, mask, num_obs
 
 
 def get_superresolution_observation(rng, x, config, shape, method='square'):
   y = jax.image.resize(x, shape, method)
-  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)  # noise
+  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
   num_obs = jnp.size(y)
   return y, num_obs
 
 
-def get_():
-  x = jnp.linspace(-3, 3, 7)
-  window = jsp.stats.norm.pdf(x) * jsp.stats.norm.pdf(x[:, None])
-  smooth_image = jsp.signal.convolve(noisy_image, window, mode='same')
+def get_convolve_observation(x, config):
+  w = jnp.linspace(-3, 3, 7)
+  window = jsp.stats.norm.pdf(w) * jsp.stats.norm.pdf(w[:, None])
+  y = jsp.signal.convolve(x, window, mode='same')
+  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
+  num_obs = jnp.size(y)
   return y, num_obs
 
 
@@ -184,15 +186,15 @@ def super_resolution(config, workdir, eval_folder="eval"):
       # VP/DDM methods with mask
       cs_methods = [
                     # 'KGDMVPplus',
-                    # 'KPDDPMplus',
+                    'KPDDPMplus',
                     # 'PiGDMVPplus',
                     # 'DPSDDPMplus',
-                    # 'Song2023plus',
+                    'Song2023plus',
                     # 'Boys2023ajacrevplus',
                     # 'Boys2023ajacfwd',
-                    'Boys2023b',
+                    # 'Boys2023b',
                     # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bvjpplus',
+                    'Boys2023bvjpplus',
                     # 'chung2022scalarplus',  # Unstable
                     # 'chung2022plus',  # Unstable
                     ]
@@ -214,10 +216,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
       # VE/SMLD methods with mask
       cs_methods = [
                     # 'KGDMVEplus',
-                    # 'KPSMLDplus',
+                    'KPSMLDplus',
                     # 'PiGDMVEplus',
                     # 'DPSSMLDplus',
-                    # 'Song2023plus',
+                    'Song2023plus',
                     # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
                     'Boys2023b',  # OOM, but can try on batch_size=1
                     # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
@@ -256,8 +258,9 @@ def super_resolution(config, workdir, eval_folder="eval"):
   print("sampling shape", sampling_shape)
 
   obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
+  method = 'nearest'
 
-  num_examples = 10
+  num_examples = 1
   xs = []
   ys = []
   np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
@@ -267,7 +270,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
     x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     y, num_obs = get_superresolution_observation(
-      rng, x, config, obs_shape, method='nearest')
+        rng, x, config, obs_shape, method=method)
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -287,26 +290,13 @@ def super_resolution(config, workdir, eval_folder="eval"):
       config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
       xs=jnp.array(xs), ys=jnp.array(ys))
 
-    if 'plus' not in config.sampling.cs_method:
-      logging.warning(
-        "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
-          (num_obs, config.data.image_size**2 * config.data.num_channels)))
-      idx_obs = np.nonzero(mask)[0]
-      H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
-      ogrid = np.arange(num_obs, dtype=int)
-      H = H.at[ogrid, idx_obs].set(1.0)
-      y = H @ mask_y
-      observation_map = None
-      adjoint_observation_map = None
-    else:
-      y = mask_y
-      observation_map = lambda x: mask * x
-      adjoint_observation_map = lambda y: y
-      H = None
+    observation_map = lambda x: jax.image.resize(x, obs_shape, method)
+    observation_map = lambda x: jax.image.resize(x, sampling_shape[1:], method)
+    H = None
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 10
+    num_repeats = 1
     for j in range(num_repeats):
       for cs_method in cs_methods:
         config.sampling.cs_method = cs_method
