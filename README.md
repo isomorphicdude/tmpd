@@ -13,11 +13,20 @@ Contents:
 ## Installation
 The package requires Python 3.7. First, it is recommended to [create a new python virtual environment](https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands). 
 Install `tensorflow=2.7.0`. This package depends on an old version of tensorflow to be compatible with the pretrained diffusion models. First, [install tensorflow 2.7.0](https://www.tensorflow.org/install/pip).
+
+```
+pip install --upgrade pip
+conda install -c conda-forge cudatoolkit=11.8.0
+python3 -m pip install nvidia-cudnn-cu11==8.6.0.163 tensorflow==2.7.0
+```
+
 Install `jax==0.2.18`. This package depends on an old version JAX to be compatible with the pretrained diffusion models. Note the JAX installation is different depending on your CUDA version, so you may have to install JAX differently than below.
 ```sh
 'pip install jax==0.2.18 jaxlib==0.1.69+cuda111 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
 ```
+
 Make sure the tensorflow and jax versions are as above and are working on your accelerator. Then,
+- Install `diffusionjax` (you may need to remove the dependency of orbax and optax, which conflicts with Python 3.7).
 - Clone the repository https://github.com/fedebotu/clone-anonymous-github
 - Install using pip `pip install -e .` from the working directory of this README file (see the `setup.py` for the requirements that this command installs).
 
