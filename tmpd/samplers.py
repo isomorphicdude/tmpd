@@ -84,19 +84,19 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         posterior_score = jit(vmap(get_linear_inverse_guidance_plus(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023ajvp':
+    elif config.sampling.cs_method.lower()=='tmpd2023ajvp':
         score = model
         posterior_score = jit(vmap(get_jvp_approximate_posterior(
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, H),
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023avjp':
+    elif config.sampling.cs_method.lower()=='tmpd2023avjp':
         score = model
         posterior_score = jit(vmap(get_vjp_approximate_posterior(
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, H),
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023ajacfwd':
+    elif config.sampling.cs_method.lower()=='tmpd2023ajacfwd':
         score = model
         # NOTE Using full jacobian will be slower in cases with d_y \approx d_x ?
         # TODO: can replace with https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#jacobian-matrix-and-matrix-jacobian-products if faster
@@ -104,7 +104,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023ajacrev':
+    elif config.sampling.cs_method.lower()=='tmpd2023ajacrev':
         score = model
         # NOTE Using full jacobian will be slower in cases with d_y \approx d_x ?
         # TODO: can replace with https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#jacobian-matrix-and-matrix-jacobian-products if faster
@@ -112,28 +112,28 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023ajacrevplus':
+    elif config.sampling.cs_method.lower()=='tmpd2023ajacrevplus':
         score = model
         posterior_score = jit(vmap(get_jacrev_approximate_posterior(
                 sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023b':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
+    elif config.sampling.cs_method.lower()=='tmpd2023b':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
         score = model
         posterior_score = jit(vmap(get_diag_approximate_posterior(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023bjacfwd':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
+    elif config.sampling.cs_method.lower()=='tmpd2023bjacfwd':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
         score = model
         posterior_score = jit(vmap(get_diag_jacfwd_approximate_posterior(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023bvjp':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
+    elif config.sampling.cs_method.lower()=='tmpd2023bvjp':  # This vmaps across calculating N_y vjps, so is O(num_samples * num_y * prod(shape)) in memory
         score = model
         posterior_score = jit(vmap(get_diag_vjp_approximate_posterior(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, H), in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
-    elif config.sampling.cs_method.lower()=='boys2023bvjpplus':
+    elif config.sampling.cs_method.lower()=='tmpd2023bvjpplus':
         score = model
         posterior_score = jit(vmap(get_vjp_approximate_posterior_plus(
             sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map), in_axes=(0, 0), out_axes=(0)))

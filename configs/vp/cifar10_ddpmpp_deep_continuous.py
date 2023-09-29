@@ -64,35 +64,14 @@ def get_config():
   model.fourier_scale = 16
   model.conv_size = 3
 
-  # TODO BB stuff
   # optim
   config.seed = 2023
 
-  # sampling.cs_method = 'Boys2023ajvp'  # OOM for CelebA but not for CIFAR10, but doens't work particularly well for CIFAR10
-  # sampling.cs_method = 'Boys2023avjp'  # OOM for CIFAR10
-  # sampling.cs_method = 'Boys2023ajac'  # OOM for CIFAR10
-  # sampling.cs_method = 'Boys2023b'  # OOM for CelebA and CIFAR10
-  # sampling.cs_method = 'Song2023'  # OOM for CelebA but doesn't work (unstable) for CIFAR10
-  # sampling.cs_method = 'Chung2022'  # Unstable for CIFAR10
-  # sampling.cs_method = 'ProjectionKalmanFilter'
-  # sampling.cs_method = 'KPDDPM'
-  # sampling.cs_method = 'KGDMVP'
-  # sampling.cs_method = 'KPDDPM'
-
-  # mask methods
-  # sampling.cs_method = 'Song2023plus'  # Unstable at std=1.1, stable at std=1.2, stable at std=10.0
-  # sampling.cs_method = 'Boys2023bvjpplus'  # Unstable, stable at std=1.2 std=10.0
-  # sampling.cs_method = 'chung2022scalarplus'  # Unstable pretty much always
-  # sampling.cs_method = 'chung2022plus'  # Unstable, stable at std=10.0
-  # sampling.cs_method = 'KPDDPMplus'
-  # sampling.cs_method = 'KPSMLDplus'
-  # sampling.cs_method = 'PiGDMVPplus'
-  # sampling.cs_method = 'KGDMVPplus'
-  sampling.cs_method = 'KPDDPMplus'
+  # sampling.cs_method = 'TMPD2023bvjpplus'
 
   sampling.noise_std = 0.1
-  sampling.denoise = True  # work out what denoise_override is
-  sampling.innovation = True  # this will probably be superceded
+  sampling.denoise = True
+  sampling.innovation = True
   sampling.inverse_scaler = None
   eval = config.eval
   eval.begin_ckpt = 8  # 12
@@ -101,7 +80,6 @@ def get_config():
   eval.pmap = False
   solver = config.solver
   # solver.outer_solver = 'eulermaruyama'
-  # solver.inner_solver = None
   solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter

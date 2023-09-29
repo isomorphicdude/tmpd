@@ -237,9 +237,8 @@ def main(argv):
     plot_samples(jnp.expand_dims(predictive_variance.reshape(-1, 1), axis=0), image_size=config.data.image_size, num_channels=config.data.num_channels, fname="analytic_target_variance")
 
     stack_samples = False
-    # batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
-    batch_sizes = jnp.array([1500])
-    num_repeats = 1
+    batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
+    num_repeats = 3
 
     ds_target = np.zeros((batch_sizes.size, num_repeats))
     ds_diffusion = np.zeros((batch_sizes.size, num_repeats))

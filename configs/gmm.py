@@ -46,7 +46,6 @@ def get_config():
     # for vp
     model.beta_min = 0.1
     model.beta_max = 25.0  # 200 also works, depends on time step size
-    # needs to be tuned
     # for ve
     model.sigma_min = 0.01
     model.sigma_max = 10.

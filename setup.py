@@ -21,7 +21,7 @@ extra_link_args = []
 setup(
     name="tmpd",
     version="0.0.0",
-    description="tmpd is a diffusion package for solving linear inverse problems",
+    description="tmpd is a diffusion package for linear inverse problems",
     long_description=README,
     long_description_content_type="text/markdown",
     license="MIT",

@@ -1,4 +1,4 @@
-"""Inverse problems. TODO: change so all with autodiff and forward maps."""
+"""Inverse problems."""
 import jax.numpy as jnp
 from jax import vmap, grad, jacfwd, vjp, jacrev, jvp, jit
 
@@ -39,8 +39,7 @@ def get_ratio(sde):
 def get_model_variance(sde):
     if type(sde).__name__=='VE':
         def model_variance(t):
-            # return sde.variance(t) / (1 + sde.variance(t))  # This was unstable for Song et al. 2023
-            return sde.variance(t)  # used this instead, as it is stable and a free hyperparameter in Song's method
+            return sde.variance(t) / (1 + sde.variance(t))
     elif type(sde).__name__=='VP':
         def model_variance(t):
             return sde.variance(t)
@@ -52,11 +51,6 @@ def get_model_variance(sde):
 def get_estimate_x_0(sde, score, shape):
     """Get an MMSE estimate of x_0
     """
-    # TODO: problem is that score is already vmapped, does this cause any inefficiencies?
-    # TODO: this can be a method within rsde class? no because it needs to reshape. So it could be
-    # a method within the sampler class. This is probably the cleanest solution for now
-    # since if it was in the sampler class, then sampler needs to access sde and is not general to
-    # markov chains.
     def estimate_x_0(x, t):
         """The MMSE estimate for x_0|x_t,
         which is it's expectation as given by Tweedie's formula."""
@@ -101,8 +95,6 @@ def get_dps(
 def get_dps_plus(
         scale, sde, score, shape, y, noise_std, observation_map):
     """
-    TODO: Unstable(?) and doesn't work on FFHQ_noise_std=0.001
-    TODO: Unstable and doesn't work - weird oversmoothing of images
     `Diffusion Posterior Sampling for general noisy inverse problems'
     implemented with a vmap grad.
     """
@@ -129,11 +121,10 @@ def get_dps_plus(
 def get_diffusion_posterior_sampling_plus(
         sde, score, shape, y, noise_std, observation_map):
     """
-    TODO: Unstable on FFHQ_noise_std=0.001
     `Diffusion Posterior Sampling for general noisy inverse problems'
     implemented with a single vjp.
     NOTE: This is not how Chung et al. 2022, https://github.com/DPS2022/diffusion-posterior-sampling/blob/main/guided_diffusion/condition_methods.py
-    implemented their method, their method is get_dps_plus.
+    implemented their method, their method is :meth:get_dps_plus.
     Whereas this method uses their approximation in Eq. 11 https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
     to directly calculate the score.
     """
@@ -143,9 +134,7 @@ def get_diffusion_posterior_sampling_plus(
         h_x_0, vjp_estimate_h_x_0, s = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
         innovation = y - h_x_0
-        variance_estimate = jnp.linalg.norm(innovation)**2
-        # C_yy = noise_std**2
-        C_yy = variance_estimate  # TODO: remove this
+        C_yy = noise_std**2
         ls = innovation / C_yy
         ls = vjp_estimate_h_x_0(ls)[0]
         posterior_score = s + ls
@@ -160,7 +149,6 @@ def get_diffusion_posterior_sampling(
     `Diffusion Posterior Sampling for general noisy inverse problems'
     implemented with a single vjp.
     Assumes linear observation_map
-    TODO: Generalizable to non-linear observation_map?
     """
     estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
     def approx_posterior_score(x, t):
@@ -172,34 +160,6 @@ def get_diffusion_posterior_sampling(
         f = innovation / C_yy
         ls = vjp_estimate_h_x_0(f)[0]
         posterior_score = s + ls
-        return posterior_score.reshape(shape)
-
-    return approx_posterior_score
-
-
-def get_pseudo_inverse_guidance(
-        sde, score, shape, y, h, h_dagger):
-    """
-    Pseudo-inverse guidance score for non-linear forward map h, with pseudo-inverse h_dagger.
-    :arg shape:
-    :arg y:
-    :arg h:
-    :arg h_dagger:
-    :arg mask:
-    :arg likelihood_score:
-    :arg estimate_x_0:
-    """
-    def ratio(t):
-        return sde.variance(t) / sde.mean_coeff(t)
-
-    estimate_x_0 = get_estimate_x_0(sde, score, shape)
-    def approx_posterior_score(x, t):
-        x = x.flatten()
-        x_0, vjp_estimate_x_0, s = vjp(
-            lambda x: estimate_x_0(x, t), x, has_aux=True)
-        innovation = h_dagger(y) - h_dagger(h(x_0))
-        ls = vjp_estimate_x_0(innovation)[0]
-        posterior_score = s + ls / ratio(t)
         return posterior_score.reshape(shape)
 
     return approx_posterior_score
@@ -229,7 +189,7 @@ def get_linear_inverse_guidance_plus(
 
 def get_linear_inverse_guidance(
         sde, score, shape, y, noise_std, observation_map, HHT):
-    """Pseudo-Inverse guidance score for linear forward map observation_map.
+    """Pseudo-Inverse guidance score for linear observation_map.
     Args:
         HHT: H @ H.T which has shape (d_y, d_y)
     """
@@ -321,7 +281,7 @@ def get_jvp_approximate_posterior(
     """
     Uses full second moment approximation of the covariance of x_0|x_t.
 
-    Computes using vjps where possible. TODO: profile vs jacfwd.
+    Computes using vjps where possible.
     """
     ratio = get_ratio(sde)
     observation_map = lambda x: H @ x
@@ -347,7 +307,7 @@ def get_vjp_approximate_posterior(
     """
     Uses full second moment approximation of the covariance of x_0|x_t.
 
-    Computes using vjps where possible. TODO: profile vs jvp methods.
+    Computes using vjps where possible.
     """
     ratio = get_ratio(sde)
     estimate_x_0 = get_estimate_h_x_0(sde, score, shape, lambda x: x)
@@ -370,8 +330,6 @@ def get_vjp_approximate_posterior(
 def get_vjp_approximate_posterior_plus(
         sde, score, shape, y, noise_std, observation_map):
     """
-    TODO: This is incorrect... need to calculate full Jacobian and then take diagonal. However, it may perform well in practice?
-    TODO: Unstable on FFHQ_noise_std=0.001
     Uses diagonal of second moment approximation of the covariance of x_0|x_t.
 
     Computes only two vjps.
@@ -398,7 +356,7 @@ def get_jacrev_approximate_posterior(
     """
     Uses full second moment approximation of the covariance of x_0|x_t.
 
-    Computes using vjps where possible. TODO: profile vs jacfwd.
+    Computes using vjps where possible.
     """
     ratio = get_ratio(sde)
     batch_observation_map = vmap(observation_map)
@@ -441,4 +399,3 @@ def get_jacfwd_approximate_posterior(
         return posterior_score.reshape(shape)
 
     return approx_posterior_score
-

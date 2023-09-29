@@ -1,12 +1,12 @@
-"""Solver classes, including Markov Chains."""
+"""Markov Chains."""
 import jax.numpy as jnp
 from jax import random, grad, vmap, vjp, jacrev
 from diffusionjax.utils import batch_mul
-from diffusionjax.solvers import Solver, DDIMVP, DDIMVE, SMLD, DDPM
+from diffusionjax.solvers import DDIMVP, DDIMVE, SMLD, DDPM
 
 
 class KGDMVP(DDIMVP):
-    """PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE. TODO: needs debugging"""
+    """PiGDM Song et al. 2023. Markov chain using the DDIM Markov Chain or VP SDE."""
     def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
@@ -48,7 +48,7 @@ class KGDMVP(DDIMVP):
 
 
 class KGDMVPplus(KGDMVP):
-    """KGDMVP with a mask. TODO: needs debugging"""
+    """KGDMVP with a mask."""
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
@@ -114,7 +114,7 @@ class KGDMVEplus(KGDMVE):
 
 
 class PiGDMVP(DDIMVP):
-    """PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE."""
+    """PiGDM Song et al. 2023. Markov chain using the DDIM Markov Chain or VP SDE."""
     def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
@@ -154,7 +154,7 @@ class PiGDMVP(DDIMVP):
 
 
 class PiGDMVPplus(PiGDMVP):
-    """KGDMVP with a mask. TODO: needs debugging"""
+    """KGDMVP with a mask."""
     def analysis(self, x, t, timestep, v):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
@@ -165,53 +165,10 @@ class PiGDMVPplus(PiGDMVP):
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
 
-class SSPiGDMVP(DDPM):
-    """Pseudo-inverse guidance for DDPM Ancestral sampling. TODO: needs debugging"""
-    def __init__(self, y, observation_map, noise_std, shape, score, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.0):
-        super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
-        self.y = y
-        self.noise_std = noise_std
-        self.shape = shape
-        self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
-        self.batch_analysis = vmap(self.analysis)
-        self.observation_map = observation_map
-
-    def analysis(self, x, t, timestep, v, ratio):
-        x = x.flatten()
-        _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
-        h_x_0, vjp_estimate_h_x_0, (_, x_0) = vjp(
-            _estimate_h_x_0, x, has_aux=True)
-        C_yy = v + self.noise_std**2
-        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
-        return (x_0 + ratio * ls).reshape(self.shape)
-
-    def posterior(self, x, t):
-        timestep = (t * (self.num_steps - 1) / self.t1).astype(jnp.int32)
-        beta = self.discrete_betas[timestep]
-        m = self.sqrt_alphas_cumprod[timestep]
-        v = self.sqrt_1m_alphas_cumprod[timestep]**2
-        ratio = v / m
-        x_dash = self.batch_analysis(x, t, timestep, v, ratio)
-        alpha = self.alphas[timestep]
-        m_prev = self.sqrt_alphas_cumprod_prev[timestep]
-        v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
-        x_mean = batch_mul(jnp.sqrt(alpha) * v_prev / v, x) + batch_mul(m_prev * beta / v, x_dash)
-        std = jnp.sqrt(beta * v_prev / v)
-        return x_mean, std
-
-    def update(self, rng, x, t):
-        """Return the update of the state and any auxilliary variables."""
-        x_mean, std = self.posterior(x, t)
-        z = random.normal(rng, x.shape)
-        x = x_mean + batch_mul(std, z)
-        return x, x_mean
-
-
 class SSPiGDMVP(DDIMVP):
     """
     Note: We found this method to be unstable on all datasets.
-    PiGDM Song et al. 2021. Markov chain using the DDIM Markov Chain or VP SDE."""
+    PiGDM Song et al. 2023. Markov chain using the DDIM Markov Chain or VP SDE."""
     def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
@@ -422,7 +379,6 @@ class KPSMLD(SMLD):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        # self.estimat_x_0 = self.get_estimate_x_0(shape, lambda x: x)
         self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.observation_map = observation_map
@@ -462,16 +418,9 @@ class KPSMLDplus(KPSMLD):
     """
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
-        # SS
-        # _estimate_x_0 = lambda x: self.estimate_x_0(x, t, timestep)
-        # x_0, vjp_estimate_x_0, (score, x_0) = vjp(
-        #     _estimate_x_0, x, has_aux=True)
-        # C_yy = self.observation_map(vjp_estimate_x_0((jnp.ones_like(x)))) + self.noise_std**2 / ratio
-        # ls = vjp_estimate_x_0((self.y - self.observation_map(x_0)) / C_yy)[0]
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (score, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
         C_yy = self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
-

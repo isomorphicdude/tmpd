@@ -68,7 +68,6 @@ def get_default_configs():
 
   config.seed = 42
 
-  # TODO: BB stuff
   # solver
   config.solver = solver = ml_collections.ConfigDict()
   solver.outer_solver = 'eulermaruyama'

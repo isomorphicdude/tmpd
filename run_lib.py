@@ -1,6 +1,5 @@
-"""Evaluation for score-based generative models."""
+"""TMPD runlib."""
 import os
-import time
 import flax
 # import flax.jax_utils as flax_utils
 import jax
@@ -189,62 +188,49 @@ def deblur(config, workdir, eval_folder="eval"):
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    # sampling_eps = 1e-3  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'Boys2023avjp',
-                    'Boys2023b',
+                    'TMPD2023avjp',
+                    'TMPD2023b',
                     'Song2023',
-                    'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVP',
-                    'KGDMVP',
                     'KPDDPM'
                     'DPSDDPM']
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    # 'KGDMVPplus',
-                    # 'KPDDPMplus',
-                    # 'PiGDMVPplus',
-                    # 'DPSDDPMplus',
+                    'KPDDPMplus',
+                    'PiGDMVPplus',
+                    'DPSDDPMplus',
                     'Song2023plus',
-                    # 'Boys2023ajacrevplus',
-                    # 'Boys2023ajacfwd',
-                    # 'Boys2023b',
-                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',  # Unstable
-                    'chung2022plus',  # Unstable
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'chung2022plus',  
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    # sampling_eps = 1e-5  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'Boys2023ajvp',
-                    'Boys2023b',
+                    'TMPD2023ajvp',
+                    'TMPD2023b',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVE',
-                    'KGDMVE',
                     'KPSMLD'
                     'DPSSMLD']
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    # 'KGDMVEplus',
                     'KPSMLDplus',
-                    # 'PiGDMVEplus',
-                    # 'DPSSMLDplus',
+                    'PiGDMVEplus',
+                    'DPSSMLDplus',
                     'Song2023plus',
-                    # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
-                    'Boys2023b',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bvjpplus',
-                    # 'chung2022scalarplus',  # Unstable
-                    # 'chung2022plus',  # Unstable
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'chung2022plus',  
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -286,8 +272,8 @@ def deblur(config, workdir, eval_folder="eval"):
     config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
     noise_std=config.sampling.noise_std)
   for i in range(num_examples):
-    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
-    x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     y, num_obs = get_convolve_observation(
         rng, x, config)
     plot_samples(
@@ -302,7 +288,6 @@ def deblur(config, workdir, eval_folder="eval"):
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
-    assert 0
 
     xs.append(x)
     ys.append(y)
@@ -325,34 +310,31 @@ def deblur(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 1
-    for j in range(num_repeats):
-      for cs_method in cs_methods:
-        config.sampling.cs_method = cs_method
-        if cs_method in ddim_methods:
-          sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
-        else:
-          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+    for cs_method in cs_methods:
+      config.sampling.cs_method = cs_method
+      if cs_method in ddim_methods:
+        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+      else:
+        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
 
+      rng, sample_rng = jax.random.split(rng, 2)
+      if config.eval.pmap:
+        # sampler = jax.pmap(sampler, axis_name='batch')
+        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        sample_rng = jnp.asarray(sample_rng)
+      else:
         rng, sample_rng = jax.random.split(rng, 2)
-        if config.eval.pmap:
-          # sampler = jax.pmap(sampler, axis_name='batch')
-          rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-          sample_rng = jnp.asarray(sample_rng)
-        else:
-          rng, sample_rng = jax.random.split(rng, 2)
 
-        q_samples, nfe = sampler(sample_rng)
-        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-        print(q_samples, "\nconfig.sampling.cs_method")
-        plot_samples(
-          q_samples,
-          image_size=config.data.image_size,
-          num_channels=config.data.num_channels,
-          fname=eval_folder + "/{}_{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i, j))
-  assert 0
+      q_samples, nfe = sampler(sample_rng)
+      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+      print(q_samples, "\nconfig.sampling.cs_method")
+      plot_samples(
+        q_samples,
+        image_size=config.data.image_size,
+        num_channels=config.data.num_channels,
+        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
 
 
 def super_resolution(config, workdir, eval_folder="eval"):
@@ -383,62 +365,49 @@ def super_resolution(config, workdir, eval_folder="eval"):
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    # sampling_eps = 1e-3  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'Boys2023avjp',
-                    'Boys2023b',
+                    'TMPD2023avjp',
+                    'TMPD2023b',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVP',
-                    'KGDMVP',
                     'KPDDPM'
                     'DPSDDPM']
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    'KGDMVPplus',
                     'KPDDPMplus',
                     'PiGDMVPplus',
                     'DPSDDPMplus',
                     'Song2023plus',
-                    # 'Boys2023ajacrevplus',
-                    # 'Boys2023ajacfwd',
-                    # 'Boys2023b',
-                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',  # Unstable
-                    'chung2022plus',  # Unstable
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'chung2022plus',  
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    # sampling_eps = 1e-5  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'Boys2023ajvp',
-                    'Boys2023b',
+                    'TMPD2023ajvp',
+                    'TMPD2023b',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVE',
-                    'KGDMVE',
                     'KPSMLD'
                     'DPSSMLD']
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'KGDMVEplus',
                     'KPSMLDplus',
                     'PiGDMVEplus',
                     'DPSSMLDplus',
                     'Song2023plus',
-                    # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
-                    # 'Boys2023b',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    'Boys2023bvjpplus',
-                    'chung2022scalarplus',  # Unstable
-                    'chung2022plus',  # Unstable
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'chung2022plus',  
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -520,34 +489,31 @@ def super_resolution(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 3
-    for j in range(num_repeats):
-      for cs_method in cs_methods:
-        config.sampling.cs_method = cs_method
-        if cs_method in ddim_methods:
-          sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
-        else:
-          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+    for cs_method in cs_methods:
+      config.sampling.cs_method = cs_method
+      if cs_method in ddim_methods:
+        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+      else:
+        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
 
+      rng, sample_rng = jax.random.split(rng, 2)
+      if config.eval.pmap:
+        # sampler = jax.pmap(sampler, axis_name='batch')
+        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        sample_rng = jnp.asarray(sample_rng)
+      else:
         rng, sample_rng = jax.random.split(rng, 2)
-        if config.eval.pmap:
-          # sampler = jax.pmap(sampler, axis_name='batch')
-          rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-          sample_rng = jnp.asarray(sample_rng)
-        else:
-          rng, sample_rng = jax.random.split(rng, 2)
 
-        q_samples, nfe = sampler(sample_rng)
-        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-        print(q_samples, "\nconfig.sampling.cs_method")
-        plot_samples(
-          q_samples,
-          image_size=config.data.image_size,
-          num_channels=config.data.num_channels,
-          fname=eval_folder + "/{}_{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i, j))
-  assert 0
+      q_samples, nfe = sampler(sample_rng)
+      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+      print(q_samples, "\nconfig.sampling.cs_method")
+      plot_samples(
+        q_samples,
+        image_size=config.data.image_size,
+        num_channels=config.data.num_channels,
+        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
 
 
 def inverse_problem(config, workdir, eval_folder="eval"):
@@ -578,65 +544,48 @@ def inverse_problem(config, workdir, eval_folder="eval"):
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    # sampling_eps = 1e-3  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    # 'Boys2023avjp',  # Unstable
-                    'Boys2023b',
-                    'Boys2023bjacfwd',
-                    'Boys2023bvjp',
+                    'TMPD2023b',
+                    'TMPD2023bjacfwd',
+                    'TMPD2023bvjp',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVP',
-                    'KGDMVP',
                     'KPDDPM'
                     'DPSDDPM']
     else:
       # VP/DDM methods with mask
       cs_methods = [
-                    # 'KGDMVPplus',
-                    # 'KPDDPMplus',
-                    # 'PiGDMVPplus',
-                    # 'DPSDDPMplus',
-                    # 'Song2023plus',
-                    # 'Boys2023ajacrevplus',
-                    # 'Boys2023ajacfwd',
-                    # 'Boys2023b',
-                    # 'Boys2023bjacfwd',
-                    'Boys2023bvjp',
-                    # 'Boys2023bvjpplus',
-                    # 'chung2022scalarplus',  # Unstable
-                    # 'chung2022plus',  # Unstable
+                    'KPDDPMplus',
+                    'PiGDMVPplus',
+                    'DPSDDPMplus',
+                    'Song2023plus',
+                    'TMPD2023bvjp',
+                    'chung2022plus',  
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    # sampling_eps = 1e-5  # TODO: add this in numerical solver
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'Boys2023ajvp',
-                    'Boys2023b',
+                    'TMPD2023ajvp',
+                    'TMPD2023b',
                     'Song2023',
-                    # 'Chung2022',  # Unstable
+                    'Chung2022',  
                     'PiGDMVE',
-                    'KGDMVE',
                     'KPSMLD'
                     'DPSSMLD']
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    # 'KGDMVEplus',
                     'KPSMLDplus',
-                    # 'PiGDMVEplus',
-                    # 'DPSSMLDplus',
-                    # 'Song2023plus',
-                    # 'Boys2023ajacrevplus',  # OOM, but can try on batch_size=1
-                    # 'Boys2023b',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bjacfwd',  # OOM, but can try on batch_size=1
-                    # 'Boys2023bvjpplus',
-                    # 'chung2022scalarplus',  # Unstable
-                    # 'chung2022plus',  # Unstable
+                    'PiGDMVEplus',
+                    'DPSSMLDplus',
+                    'Song2023plus',
+                    'TMPD2023bvjpplus',
+                    'chung2022plus',  
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -716,34 +665,31 @@ def inverse_problem(config, workdir, eval_folder="eval"):
 
     cs_method = config.sampling.cs_method
 
-    num_repeats = 10
-    for j in range(num_repeats):
-      for cs_method in cs_methods:
-        config.sampling.cs_method = cs_method
-        if cs_method in ddim_methods:
-          sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
-        else:
-          sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-            y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+    for cs_method in cs_methods:
+      config.sampling.cs_method = cs_method
+      if cs_method in ddim_methods:
+        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
+      else:
+        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+          y, num_obs, H, observation_map, adjoint_observation_map, stack_samples=False)
 
+      rng, sample_rng = jax.random.split(rng, 2)
+      if config.eval.pmap:
+        # sampler = jax.pmap(sampler, axis_name='batch')
+        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        sample_rng = jnp.asarray(sample_rng)
+      else:
         rng, sample_rng = jax.random.split(rng, 2)
-        if config.eval.pmap:
-          # sampler = jax.pmap(sampler, axis_name='batch')
-          rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-          sample_rng = jnp.asarray(sample_rng)
-        else:
-          rng, sample_rng = jax.random.split(rng, 2)
 
-        q_samples, nfe = sampler(sample_rng)
-        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-        print(q_samples, "\n{}".format(config.sampling.cs_method))
-        plot_samples(
-          q_samples,
-          image_size=config.data.image_size,
-          num_channels=config.data.num_channels,
-          fname=eval_folder + "/{}_{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i, j))
-  assert 0
+      q_samples, nfe = sampler(sample_rng)
+      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+      print(q_samples, "\n{}".format(config.sampling.cs_method))
+      plot_samples(
+        q_samples,
+        image_size=config.data.image_size,
+        num_channels=config.data.num_channels,
+        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
 
 
 def sample(config,
@@ -812,19 +758,12 @@ def sample(config,
 
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  # score_fn is vmap'd
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-  # is score fn a vectorized function? yes
-
   rsde = sde.reverse(score_fn)
   drift, diffusion = rsde.sde(x_0, t_0)
-  print(drift.shape)
-  print(diffusion.shape)
-  print(drift[0, 0, 0, 0])
-  print(drift[-1, -1, -1, -1])
-  print(jnp.sum(drift))
-  print(diffusion[0])
 
   sampler = get_sampler(
     (4, config.data.image_size, config.data.image_size, config.data.num_channels),
@@ -838,4 +777,3 @@ def sample(config,
     image_size=config.data.image_size,
     num_channels=config.data.num_channels,
     fname="{} samples".format(config.data.dataset))
-

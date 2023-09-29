@@ -12,25 +12,7 @@ def get_config():
     data = config.data
     solver = config.solver
 
-    # profiling arguments
-    # sampling.cs_method = 'Boys2023avjp'
-    # sampling.cs_method = 'Boys2023ajvp'
-    # sampling.cs_method = 'Boys2023ajacrev'
-    # sampling.cs_method = 'Boys2023ajacfwd'
-    # sampling.cs_method = 'Boys2023b'
-    sampling.cs_method = 'boys2023bjacfwd'
-    # sampling.cs_method = 'Boys2023bvjpplus'
-    # sampling.cs_method = 'Song2023'
-    # sampling.cs_method = 'Chung2022'
-
-    # mask methods
-    # sampling.cs_method = 'Song2023plus'
-    # sampling.cs_method = 'Boys2023bplus'  # OOM
-    # sampling.cs_method = 'Boys2023bvjpplus'
-    # sampling.cs_method = 'Boys2023bjvpplus'
-    # sampling.cs_method = 'Boys2023cplus'
-    # sampling.cs_method = 'chung2022scalarplus'
-    # sampling.cs_method = 'chung2022plus'
+    sampling.cs_method = 'TMPD2023ajacfwd'
 
     eval.pmap = True
     data.image_size = 32
@@ -48,8 +30,6 @@ def get_config():
 
     model.beta_min = 0.01
     model.beta_max = 25.
-    # model.beta_min = 0.001
-    # model.beta_max = 10.
 
     solver.num_outer_steps = 1000
     solver.outer_solver = 'EulerMaruyama'
