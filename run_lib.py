@@ -5,6 +5,7 @@ import flax
 # import flax.jax_utils as flax_utils
 import jax
 import jax.numpy as jnp
+from jax import lax
 import jax.scipy as jsp
 import numpy as np
 import tensorflow as tf
@@ -118,10 +119,28 @@ def get_superresolution_observation(rng, x, config, shape, method='square'):
 
 
 def get_convolve_observation(rng, x, config):
-  w = jnp.linspace(-3, 3, 7)
-  window = jsp.stats.norm.pdf(w) * jsp.stats.norm.pdf(w[:, None])
-  y = jsp.signal.convolve(x, window, mode='same')
-  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
+  width = 11
+  k = jnp.linspace(-3, 3, width)
+  print(x.shape)
+  x = jnp.transpose(x,[2,1,0])    # lhs = NCHW image tensor
+  print(x.shape)
+  x = jnp.expand_dims(x, 0)
+  print(x.shape)
+  window = jsp.stats.norm.pdf(k) * jsp.stats.norm.pdf(k[:, None])
+  kernel = jnp.zeros((width, width, 3, 3), dtype=jnp.float32)
+  kernel += window[:, :, jnp.newaxis, jnp.newaxis]
+  print(kernel.shape)
+  k = jnp.transpose(kernel, [3, 2, 0, 1])  # rhs = OIHW conv kernel tensor
+  print(k.shape)
+  y = lax.conv(x,  # lhs = NCHW image tensor
+               k,  # rhs = OIHW conv kernel tensor
+               (1, 1),  # window strides
+               'SAME')  # padding mode
+  print("out", y.shape)
+  y = jnp.transpose(y, [0, 2, 3, 1])
+  y = y[0]
+  print("out", y.shape)
+  # y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
   num_obs = jnp.size(y)
   return y, num_obs
 
@@ -269,8 +288,8 @@ def deblur(config, workdir, eval_folder="eval"):
   for i in range(num_examples):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
     x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    y, num_obs = get_superresolution_observation(
-        rng, x, config, obs_shape, method=method)
+    y, num_obs = get_convolve_observation(
+        rng, x, config)
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -283,6 +302,7 @@ def deblur(config, workdir, eval_folder="eval"):
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
+    assert 0
 
     xs.append(x)
     ys.append(y)
@@ -450,8 +470,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
 
-  obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
-  method = 'nearest'
+  # obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
+  # method = 'nearest'
+  obs_shape = (config.data.image_size//16, config.data.image_size//16, config.data.num_channels)
+  method = 'bicubic'
 
   num_examples = 10
   xs = []

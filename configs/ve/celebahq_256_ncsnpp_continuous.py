@@ -90,7 +90,7 @@ def get_config():
   # sampling.cs_method = 'PiGDMVEplus'
   # sampling.cs_method = 'DPSSMLDplus'
 
-  sampling.noise_std = 0.01
+  sampling.noise_std = 0.001
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None

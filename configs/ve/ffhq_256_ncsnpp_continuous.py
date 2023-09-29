@@ -94,7 +94,7 @@ def get_config():
   # sampling.cs_method = 'DPSSMLDplus'
   sampling.cs_method = 'plus'
 
-  sampling.noise_std = 0.01
+  sampling.noise_std = 0.005
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
