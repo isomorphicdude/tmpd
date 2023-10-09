@@ -11,8 +11,8 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file(
     "config", None, "Training configuration.", lock_config=True)
 flags.DEFINE_string("workdir", None, "Work directory.")
-flags.DEFINE_enum("mode", None, ["sample", "inverse_problem", "super_resolution", "deblur"],
-                  "Running mode: sample, inverse_problem, super_resolution or deblur")
+flags.DEFINE_enum("mode", None, ["sample", "inpainting", "super_resolution", "deblur"],
+                  "Running mode: sample, inpainting, super_resolution or deblur")
 flags.DEFINE_string("eval_folder", "eval",
                     "The folder name for storing evaluation results")
 flags.mark_flags_as_required(["workdir", "config", "mode"])
@@ -23,16 +23,12 @@ def main(argv):
     os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
     if FLAGS.mode == "sample":
-        # Run the evaluation pipeline
         run_lib.sample(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
-    elif FLAGS.mode == "inverse_problem":
-        # Run the evaluation pipeline
+    elif FLAGS.mode == "inpainting":
         run_lib.inverse_problem(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
     elif FLAGS.mode == "super_resolution":
-        # Run the evaluation pipeline
         run_lib.super_resolution(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
     elif FLAGS.mode == "deblur":
-        # Run the evaluation pipeline
         run_lib.deblur(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
 
 

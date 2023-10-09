@@ -516,7 +516,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
         fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
 
 
-def inverse_problem(config, workdir, eval_folder="eval"):
+def inpainting(config, workdir, eval_folder="eval"):
   jax.default_device = jax.devices()[0]
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
   # ... they must be all the same model of device for pmap to work
