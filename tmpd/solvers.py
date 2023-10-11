@@ -126,11 +126,13 @@ class PiGDMVP(DDIMVP):
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
 
-    def analysis(self, x, t, timestep, v):
+    def analysis(self, x, t, timestep, v, alpha):
         x = x.flatten()
         h_x_0, (epsilon, _) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
         grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t, timestep)[0])(x)
-        Cyy = v + self.noise_std**2
+        # Value suggested for VPSDE in original PiGDM paper
+        r = variance * self.data_variance  / (variance + alpha * self.data_variance)
+        Cyy = r + self.noise_std**2
         f = (self.y - h_x_0) / Cyy
         ls = grad_H_x_0.T @ f
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
@@ -155,12 +157,14 @@ class PiGDMVP(DDIMVP):
 
 class PiGDMVPplus(PiGDMVP):
     """KGDMVP with a mask."""
-    def analysis(self, x, t, timestep, v):
+    def analysis(self, x, t, timestep, v, alpha):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, _) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = v + self.noise_std**2
+        # Value suggested for VPSDE in original PiGDM paper
+        r = variance * self.data_variance  / (variance + alpha * self.data_variance)
+        C_yy = r + self.noise_std**2
         ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return epsilon.reshape(self.shape), ls.reshape(self.shape)
 
@@ -178,11 +182,13 @@ class SSPiGDMVP(DDIMVP):
         self.shape = shape
         self.num_y = y.shape[0]
 
-    def analysis(self, x, t, timestep, r):
+    def analysis(self, x, t, timestep, v, alpha):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
+        # Value suggested for VPSDE in original PiGDM paper
+        r = variance * self.data_variance  / (variance + alpha * self.data_variance)
         C_yy = r + self.noise_std**2
         ls = r * vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
         return x_0.reshape(self.shape), ls.reshape(self.shape), epsilon.reshape(self.shape)
@@ -193,8 +199,7 @@ class SSPiGDMVP(DDIMVP):
         sqrt_1m_alpha = self.sqrt_1m_alphas_cumprod[timestep]
         v = sqrt_1m_alpha**2
         alpha = m**2
-        r = v  # Value suggested for VPSDE in original PiGDM paper
-        x_0, ls, epsilon = self.batch_analysis(x, t, timestep, r)
+        x_0, ls, epsilon = self.batch_analysis(x, t, timestep, v, alpha)
         m_prev = self.sqrt_alphas_cumprod_prev[timestep]
         v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
         alpha_prev = m_prev**2
@@ -207,7 +212,7 @@ class SSPiGDMVP(DDIMVP):
 
 class PiGDMVE(DDIMVE):
     """PiGDMVE for the SMLD Markov Chain or VE SDE."""
-    def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, sigma_min=0.01, sigma_max=378.):
+    def __init__(self, y, observation_map, noise_std, shape, model, data_variance=1.0, eta=0.0, num_steps=1000, dt=None, epsilon=None, sigma_min=0.01, sigma_max=378.):
         super().__init__(model, eta, num_steps, dt, epsilon, sigma_min, sigma_max)
         self.eta = eta
         self.model = model
@@ -218,6 +223,7 @@ class PiGDMVE(DDIMVE):
                         jnp.log(self.sigma_max),
                         self.num_steps))
         self.y = y
+        self.data_variance = data_variance
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
@@ -227,7 +233,7 @@ class PiGDMVE(DDIMVE):
 
     def analysis(self, x, t, timestep, v):
         x = x.flatten()
-        r = v / (v + 1.)
+        r = v * self.data_variance / (variance + self.data_variance)
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
