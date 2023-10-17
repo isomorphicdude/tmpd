@@ -75,10 +75,15 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='song2023':
         score = model
-        posterior_score = jit(vmap(get_linear_inverse_guidance(
-            sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map, H @ H.T),
-            in_axes=(0, 0), out_axes=(0)))
-        sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
+        sampler = get_sampler(sampling_shape,
+                              EulerMaruyama(sde.reverse(score).condition(
+                                  get_linear_inverse_guidance, observation_map, sampling_shape[1:], y, config.sampling.noise_std, H @ H.T)),
+                              denoise=True)
+
+        # posterior_score = jit(vmap(get_linear_inverse_guidance(
+        #     sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map, H @ H.T),
+        #     in_axes=(0, 0), out_axes=(0)))
+        # sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='song2023plus':
         score = model
         posterior_score = jit(vmap(get_linear_inverse_guidance_plus(
@@ -98,13 +103,25 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
     elif config.sampling.cs_method.lower()=='tmpd2023ajacfwd':
         score = model
+        sampler = get_sampler(sampling_shape,
+                              EulerMaruyama(sde.reverse(score).condition(
+                                get_jacfwd_approximate_posterior, sampling_shape[1:], y, config.sampling.noise_std, observation_map)),
+                              denoise=True)
+        assert 0
         # NOTE Using full jacobian will be slower in cases with d_y \approx d_x ?
         # TODO: can replace with https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#jacobian-matrix-and-matrix-jacobian-products if faster
+        rsde = sde.reverse(posterior_score)
         posterior_score = jit(vmap(get_jacfwd_approximate_posterior(
-                sde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),
+                rsde, score, sampling_shape[1:], y, config.sampling.noise_std, observation_map),  # TODO
                 in_axes=(0, 0), out_axes=(0)))
         sampler = get_sampler(sampling_shape, EulerMaruyama(sde.reverse(posterior_score)), denoise=True)
     elif config.sampling.cs_method.lower()=='tmpd2023ajacrev':
+        sampler = get_sampler(sampling_shape,
+                              EulerMaruyama(sde.reverse(score).condition(
+                                get_jacrev_approximate_posterior, sampling_shape[1:], y, config.sampling.noise_std, observation_map)),
+                              denoise=True)
+        assert 0
+
         score = model
         # NOTE Using full jacobian will be slower in cases with d_y \approx d_x ?
         # TODO: can replace with https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#jacobian-matrix-and-matrix-jacobian-products if faster

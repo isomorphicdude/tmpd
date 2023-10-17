@@ -113,7 +113,7 @@ def main(argv):
         C_emp = jnp.cov(p_samples[:, :].T)
         m_emp = jnp.mean(p_samples[:, :].T, axis=1)
         corr_emp = jnp.corrcoef(p_samples[:, :].T)
-        plot_heatmap(samples=p_samples[:, [0, 1]], area_min=-3, area_max=3, fname="target_prior_heatmap")
+        plot_heatmap(samples=p_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="target_prior_heatmap")
 
         p_samples = p_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         p_samples = jnp.expand_dims(p_samples, axis=3)
@@ -128,6 +128,7 @@ def main(argv):
 
         # Running the reverse SDE with the true score
         solver = EulerMaruyama(sde.reverse(true_score), num_steps=config.solver.num_outer_steps)
+
         sampler= get_sampler((config.eval.batch_size//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels), solver)
         if config.eval.pmap:
             sampler = jax.pmap(sampler, axis_name='batch')
@@ -144,7 +145,7 @@ def main(argv):
         delta_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
         delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
-        plot_heatmap(samples=q_samples[:, [0, 1]], area_min=-3, area_max=3, fname="diffusion_prior_heatmap")
+        plot_heatmap(samples=q_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="diffusion_prior_heatmap")
 
         q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         q_samples = np.expand_dims(q_samples, axis=3)
@@ -183,7 +184,7 @@ def main(argv):
         # delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
         # logging.info("prior_PC_analytic delta_mean={}, delta_var={}, delta_cov={}".format(
         #     delta_mean, delta_var, delta_cov))
-        # plot_heatmap(samples=q_samples[:, [0, 1]], area_min=-3, area_max=3, fname="heatmap PC analytic score")
+        # plot_heatmap(samples=q_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="heatmap PC analytic score")
 
         # q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         # q_samples = np.expand_dims(q_samples, axis=3)
@@ -237,7 +238,7 @@ def main(argv):
     plot_samples(jnp.expand_dims(predictive_variance.reshape(-1, 1), axis=0), image_size=config.data.image_size, num_channels=config.data.num_channels, fname="analytic_target_variance")
 
     stack_samples = False
-    batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
+    batch_sizes = np.array([9, 21, 45, 93, 189, 375, 753, 1500], dtype=np.int32)
     num_repeats = 3
 
     ds_target = np.zeros((batch_sizes.size, num_repeats))
@@ -248,7 +249,7 @@ def main(argv):
     times_diffusion = np.zeros((batch_sizes.size, num_repeats))
     for j, batch_size in enumerate(batch_sizes):
         logging.info("\nbatch_size={}".format(batch_size))
-        sampling_shape = (batch_size//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+        sampling_shape = (int(batch_size//num_devices), int(config.data.image_size), int(config.data.image_size), int(config.data.num_channels))
         sampler = get_cs_sampler(
             config, sde, true_score, sampling_shape,
             config.sampling.inverse_scaler,
@@ -268,7 +269,7 @@ def main(argv):
             times_target[j, r] = time_delta
 
             if batch_size > 20 or jnp.isfinite(jnp.cov(p_samples[:, :].T)).all():
-                plot_heatmap(samples=p_samples[:, [0, 1]], area_min=-3, area_max=3, fname="analytic_heatmap")
+                plot_heatmap(samples=p_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="analytic_heatmap")
                 C_emp = jnp.cov(p_samples[:, :].T)
                 m_emp = jnp.mean(p_samples[:, :].T, axis=1)
                 delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size

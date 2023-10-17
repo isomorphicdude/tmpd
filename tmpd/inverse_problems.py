@@ -3,44 +3,44 @@ import jax.numpy as jnp
 from jax import vmap, grad, jacfwd, vjp, jacrev, jvp, jit
 
 
-def get_estimate_h_x_0(sde, score, shape, observation_map):
-    """Get an MMSE estimate of x_0, pushed through observation_map.
-    Args:
-        observation_map: forward, assumed linear, map.
-    """
-    def estimate_x_0(x, t):
-        """The MMSE estimate for x_0|x_t,
-        which is it's expetion as given by Tweedie's formula."""
-        m_t = sde.mean_coeff(t)
-        v_t = sde.variance(t)
-        x = x.reshape(shape)
-        x = jnp.expand_dims(x, axis=0)
-        t = jnp.expand_dims(t, axis=0)
-        s = score(x, t)
-        s = s.flatten()
-        x = x.flatten()
-        return observation_map((x + v_t * s) / m_t), s
+# def get_estimate_h_x_0(sde, score, shape, observation_map):
+#     """Get an MMSE estimate of x_0, pushed through observation_map.
+#     Args:
+#         observation_map: forward, assumed linear, map.
+#     """
+#     def estimate_x_0(x, t):
+#         """The MMSE estimate for x_0|x_t,
+#         which is it's expetion as given by Tweedie's formula."""
+#         x = x.reshape(shape)
+#         x = jnp.expand_dims(x, axis=0)
+#         t = jnp.expand_dims(t, axis=0)
+#         m_t = sde.mean_coeff(t)
+#         v_t = sde.variance(t)
+#         s = score(x, t)
+#         s = s.flatten()
+#         x = x.flatten()
+#         return observation_map((x + v_t * s) / m_t), s
 
-    return estimate_x_0
+#     return estimate_x_0
 
 
-def get_estimate_x_0(sde, score, shape):
-    """Get an MMSE estimate of x_0
-    """
-    def estimate_x_0(x, t):
-        """The MMSE estimate for x_0|x_t,
-        which is it's expectation as given by Tweedie's formula."""
-        m_t = sde.mean_coeff(t)
-        v_t = sde.variance(t)
-        x = x.reshape(shape)
-        x = jnp.expand_dims(x, axis=0)
-        t = jnp.expand_dims(t, axis=0)
-        s = score(x, t)
-        s = s.flatten()
-        x = x.flatten()
-        return (x + v_t * s) / m_t, s
+# def get_estimate_x_0(sde, score, shape):
+#     """Get an MMSE estimate of x_0
+#     """
+#     def estimate_x_0(x, t):
+#         """The MMSE estimate for x_0|x_t,
+#         which is it's expectation as given by Tweedie's formula."""
+#         x = x.reshape(shape)
+#         x = jnp.expand_dims(x, axis=0)
+#         t = jnp.expand_dims(t, axis=0)
+#         m_t = sde.mean_coeff(t)
+#         v_t = sde.variance(t)
+#         s = score(x, t)
+#         s = s.flatten()
+#         x = x.flatten()
+#         return (x + v_t * s) / m_t, s
 
-    return estimate_x_0
+#     return estimate_x_0
 
 
 def get_dps(
@@ -163,23 +163,46 @@ def get_linear_inverse_guidance_plus(
 
 
 def get_linear_inverse_guidance(
-        sde, score, shape, y, noise_std, observation_map, HHT):
+        sde, observation_map, shape, y, noise_std, HHT):
+        # sde, score, shape, y, noise_std, observation_map, HHT):
     """Pseudo-Inverse guidance score for linear observation_map.
     Args:
         HHT: H @ H.T which has shape (d_y, d_y)
     """
-    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
+    estimate_h_x_0 = sde.get_estimate_x_0(observation_map)
+    batch_linalg_solve = vmap(lambda a, b: jnp.linalg.solve(a, b), in_axes=(None, 0))
+    # estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
     def approx_posterior_score(x, t):
-        x = x.flatten()
-        h_x_0, vjp_estimate_h_x_0, s = vjp(
+        print(x.shape)
+        print(t.shape)
+        # x = x.flatten()
+        h_x_0, vjp_estimate_h_x_0, (s, x_0) = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
+        print(h_x_0.shape)
+        print(s.shape)
+        print(x_0.shape)
         innovation = y - h_x_0
-        C_yy = sde.r2(t, data_variance=1.) * HHT + noise_std**2 * jnp.eye(y.shape[0])
-        f = jnp.linalg.solve(C_yy, innovation)
+        print("hi")
+        print(HHT.shape)
+        print(sde.r2(t[0], 1.).shape)
+        print("i")
+        C_yy = sde.r2(t[0], data_variance=1.) * HHT + noise_std**2 * jnp.eye(y.shape[0])
+        print("innovation", innovation.shape)
+        print("cyy", C_yy.shape)
+        # Will need to be a batch operation: More memory efficient this way as well, only use once C_yy matrix
+        # f = jnp.linalg.solve(C_yy, innovation)
+        f = batch_linalg_solve(C_yy, innovation)
+        print('f', f.shape)
         ls = vjp_estimate_h_x_0(f)[0]
-        posterior_score = s + ls
+        print('ls', ls.shape)
+        print('s', s.shape)
+        guided_score = s + ls
+        print("shape", shape)
+        return guided_score
+        assert 0
         return posterior_score.reshape(shape)
 
+    # return vmap(approx_posterior_score)
     return approx_posterior_score
 
 
@@ -344,17 +367,19 @@ def get_jacrev_approximate_posterior(
 
 
 def get_jacfwd_approximate_posterior(
-        sde, score, shape, y, noise_std, observation_map):
+        estimate_h_x_0, shape, y, noise_std, observation_map):
     """
     Uses full second moment approximation of the covariance of x_0|x_t.
 
     Computes using d_y jvps.
     """
     batch_observation_map = vmap(observation_map)
-    estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
+    # estimate_h_x_0 = get_estimate_h_x_0(sde, score, shape, observation_map)
+    # estimate_h_x_0 = sde.get_estimate_x_0(observation_map)
     def approx_posterior_score(x, t):
-        x = x.flatten()
-        h_x_0, s = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        # x = x.flatten()
+        h_x_0, (s, x_0) = estimate_h_x_0(x, t)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        assert 0
         H_grad_x_0 = jacfwd(lambda _x: estimate_h_x_0(_x, t)[0])(x)
         H_grad_H_x_0 = batch_observation_map(H_grad_x_0)
         C_yy = sde.ratio(t) * H_grad_H_x_0 + noise_std**2 * jnp.eye(y.shape[0])
