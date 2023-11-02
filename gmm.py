@@ -22,6 +22,7 @@ import numpy as np
 import logging
 import ot
 from scipy.stats import wasserstein_distance
+import time
 
 
 FLAGS = flags.FLAGS
@@ -33,7 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 def sliced_wasserstein(dist_1, dist_2, n_slices=100):
-    projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
+    # projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
+    projections = torch.randn(size=(n_slices, dist_1.shape[1]))
     projections = projections / torch.linalg.norm(projections, dim=-1)[:, None]
     dist_1_projected = (projections @ dist_1.T)
     dist_2_projected = (projections @ dist_2.T)
@@ -168,7 +170,8 @@ def main(argv):
     size = 8.
     num_repeats = 20
 
-    for ind_dim, dim in enumerate([8, 80, 800]):
+    # TODO: change back
+    for ind_dim, dim in enumerate([80, 8, 80, 800]):
         config.data.image_size = dim
 
         # setup of the inverse problem
@@ -213,7 +216,8 @@ def main(argv):
         logging.info("diffusion prior:\nmean {},\nvar {}".format(np.mean(samples, axis=0), np.var(samples, axis=0)))
         plot_single_image(config.sampling.noise_std, dim, '_', 1000, i, 'prior', [0, 1], samples, color=color_algorithm)
 
-        for ind_ptg, dim_y in enumerate([1, 2, 4]):
+        # TODO: change back
+        for ind_ptg, dim_y in enumerate([4, 1, 2, 4]):
             for i in trange(0, num_repeats, unit="trials dim_y={}".format(dim_y)):
                 seed_num_inv_problem = (2**(ind_dim))*(3**(ind_ptg)*(5**(ind_increase))) + i
                 manual_seed(seed_num_inv_problem)
@@ -240,6 +244,10 @@ def main(argv):
 
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
                 cs_methods = ['Song2023', 'Chung2022', 'TMPD2023avjp', 'TMPD2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
+                cs_methods = ['chung2022plus', 'song2023plus', 'tmpd2023bvjpplus']
+                # cs_methods = ['tmpd2023avjp']
+                # cs_methods = ['song2023plus']
+                cs_methods = ['tmpd2023ajacfwd']
 
                 for cs_method in cs_methods:
                     config.sampling.cs_method = cs_method
@@ -250,7 +258,9 @@ def main(argv):
                         y, dim_y,
                         H, observation_map, adjoint_observation_map, stack_samples=config.sampling.stack_samples)
 
+                    time_prev = time.time()
                     samples, nfe = sampler(sample_rng)
+                    sample_time = time.time() - time_prev
 
                     if config.sampling.stack_samples:
                         samples = samples.reshape(
@@ -263,7 +273,7 @@ def main(argv):
                         sliced_wasserstein_distance = sliced_wasserstein(dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
                         ot_sliced_wasserstein_distance = ot_sliced_wasserstein(seed=seed_num_inv_problem, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
 
-                        print("{}".format(config.sampling.cs_method), sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
+                        print("sample_time: {}, {}".format(sample_time, config.sampling.cs_method), sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
 
                         dists_infos.append({"seed": seed_num_inv_problem,
                                             "dim": config.data.image_size,

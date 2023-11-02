@@ -12,7 +12,16 @@ def get_config():
     data = config.data
     solver = config.solver
 
-    sampling.cs_method = 'TMPD2023ajacfwd'
+    # sampling.cs_method = 'TMPD2023ajacfwd'
+    # sampling.cs_method = 'tmpd2023ajacfwd'
+    # sampling.cs_method = 'tmpd2023ajacrev'
+    sampling.cs_method = 'tmpd2023avjp'
+    # sampling.cs_method = 'chung2022scalarplus'
+    # sampling.cs_method = 'tmpd2023b'
+    # sampling.cs_method = 'tmpd2023ajacfwd'
+    # sampling.cs_method = 'tmpd2023bvjpplus'
+    # sampling.cs_method = 'tmpd2023bjacfwd'
+    # sampling.cs_method = 'tmpd2023bvjp'
 
     eval.pmap = True
     data.image_size = 32

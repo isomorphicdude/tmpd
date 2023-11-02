@@ -69,29 +69,6 @@ def Distance2(m1, C1, m2, C2):
     return jnp.linalg.norm(m1 - m2)**2 + jnp.linalg.norm(C1_half - C2_half)**2
 
 
-def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
-    img = image_grid(x, image_size, num_channels)
-    plt.figure(figsize=(8,8))
-    plt.axis('off')
-    plt.imshow(img, cmap=cmap)
-    plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
-    plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
-    plt.close()
-
-
-def image_grid(x, image_size, num_channels):
-    img = x.reshape(-1, image_size, image_size, num_channels)
-    w = int(np.sqrt(img.shape[0]))
-    return img.reshape((w, w, image_size, image_size, num_channels)).transpose((0, 2, 1, 3, 4)).reshape((w * image_size, w * image_size, num_channels))
-
-
-def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA, x_max=5.0):
-    x = np.linspace(-x_max, x_max, image_size)
-    plt.plot(x, samples[:, :, 0, 0].T, alpha=alpha)
-    plt.savefig(fname)
-    plt.close()
-
-
 def plot(train_data, test_data, mean, variance,
          fname="plot.png"):
     X, y = train_data

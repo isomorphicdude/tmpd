@@ -6,7 +6,7 @@ from jax import jit, vmap
 import jax.random as random
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from diffusionjax.plot import plot_heatmap
+from diffusionjax.plot import plot_heatmap, plot_samples, plot_samples_1D
 from diffusionjax.solvers import EulerMaruyama
 import diffusionjax.sde as sde_lib
 from diffusionjax.utils import get_sampler
@@ -21,10 +21,7 @@ import time
 from tmpd.plot import (
     Distance2,
     Wasserstein2,
-    plot,
-    plot, plot_samples,
-    plot_samples_1D
-)
+    plot)
 from tmpd.samplers import get_cs_sampler
 
 
@@ -86,7 +83,7 @@ def main(argv):
         # Reshape image data
         samples = samples.reshape(-1, config.data.image_size, config.data.image_size, config.data.num_channels)
         plot_samples(samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples")
-        plot_samples_1D(samples[:64], config.data.image_size, "samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(samples[:64, ..., 0], config.data.image_size, "samples_1D", alpha=FG_ALPHA)
 
     def nabla_log_pt(x, t):
         """
@@ -118,7 +115,7 @@ def main(argv):
         p_samples = p_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         p_samples = jnp.expand_dims(p_samples, axis=3)
         plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples_prior")
-        plot_samples_1D(p_samples, image_size=config.data.image_size, fname="analytic_prior_samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(p_samples[..., 0], image_size=config.data.image_size, fname="analytic_prior_samples_1D", alpha=FG_ALPHA)
         delta_t_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_t_var = jnp.linalg.norm(jnp.diag(C) - jnp.diag(C_emp)) / config.data.image_size
         delta_t_mean = jnp.linalg.norm(m_emp) / config.data.image_size
@@ -150,7 +147,7 @@ def main(argv):
         q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         q_samples = np.expand_dims(q_samples, axis=3)
         plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="diffusion_prior_samples")
-        plot_samples_1D(q_samples, image_size=config.data.image_size, fname="diffusion_prior_samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(q_samples[..., 0], image_size=config.data.image_size, fname="diffusion_prior_samples_1D", alpha=FG_ALPHA)
         delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_var = jnp.linalg.norm(jnp.diag(C) - jnp.diag(C_emp)) / config.data.image_size
         delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
@@ -189,7 +186,7 @@ def main(argv):
         # q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         # q_samples = np.expand_dims(q_samples, axis=3)
         # plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples prior PC")
-        # plot_samples_1D(q_samples, image_size=config.data.image_size, fname="samples prior PC 1D", alpha=FG_ALPHA)
+        # plot_samples_1D(q_samples[..., 0], image_size=config.data.image_size, fname="samples prior PC 1D", alpha=FG_ALPHA)
 
         # logging.info(delta_t_corr)  # a value of 0.05 (for 512 samples) are indistinguisable from
         # # true samples due to emprical covariance error
@@ -205,8 +202,7 @@ def main(argv):
     y_data = y.copy()
     X_data = X[idx_obs, :]
 
-
-    if 'plus' in config.sampling.cs_method:
+    if 'plus' in config.sampling.cs_method or 'mask' in config.sampling.cs_method:
         mask = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         mask = mask.at[idx_obs].set(1.0)
         y = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
@@ -214,8 +210,12 @@ def main(argv):
         observation_map = lambda x: mask * x
         adjoint_observation_map = lambda y: y
     else:
-        observation_map = lambda x: H @ x
-        adjoint_observation_map = lambda y: H.T @ y
+        def observation_map(x):
+            x = x.flatten()  # for newer methods
+            return H @ x
+        # observation_map = lambda x: H @ x
+        # adjoint_observation_map = lambda y: H.T @ y
+        adjoint_observation_map = None
         mask = None
 
     def prior(prior_parameters):
@@ -293,7 +293,7 @@ def main(argv):
                 logging.info('distance chol [{}] {} seconds'.format(d2, td2delta))
 
             p_samples = p_samples.reshape((batch_size,) + sampling_shape[1:])
-            plot_samples_1D(p_samples, image_size=config.data.image_size, fname="target_samples_1D", alpha=FG_ALPHA)
+            plot_samples_1D(p_samples[..., 0], image_size=config.data.image_size, fname="target_samples_1D", alpha=FG_ALPHA)
             plot_samples(p_samples[:int(batch_size**0.5)**2,], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="target_samples")
 
             if 1:
@@ -338,7 +338,7 @@ def main(argv):
                     logging.info('distance chol [{}] {} seconds'.format(d2, td2delta))
 
                 samples = samples.reshape(-1, config.data.image_size, config.data.image_size, config.data.num_channels)
-                plot_samples_1D(samples, image_size=config.data.image_size, fname="diffusion_samples_1D", alpha=FG_ALPHA)
+                plot_samples_1D(samples[..., 0], image_size=config.data.image_size, fname="diffusion_samples_1D", alpha=FG_ALPHA)
                 plot_samples(samples[:int(batch_size**0.5)**2], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="diffusion_samples")
 
         np.savez('./example_{}.npz'.format(config.sampling.cs_method.lower()),
