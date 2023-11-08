@@ -59,7 +59,7 @@ def get_vjp_guidance(
 
 
 def get_vjp_guidance_plus(
-        sde, observation_map, shape, y, noise_std):
+        sde, observation_map, y, noise_std):
     """
     Uses diagonal of second moment approximation of the covariance of x_0|x_t.
 
@@ -68,17 +68,20 @@ def get_vjp_guidance_plus(
     estimate_h_x_0 = sde.get_estimate_x_0(observation_map)
     batch_observation_map = vmap(observation_map)
     def guidance_score(x, t):
+        x = jnp.expand_dims(x, axis=0)
+        t = jnp.expand_dims(t, axis=0)
         h_x_0, vjp_h_x_0, (s, _) = vjp(
             lambda x: estimate_h_x_0(x, t), x, has_aux=True)
+        diag = vjp_h_x_0(batch_observation_map(jnp.ones(x.shape)))[0]
         diag = batch_observation_map(vjp_h_x_0(batch_observation_map(jnp.ones(x.shape)))[0])
         C_yy = sde.ratio(t[0]) * diag + noise_std**2
         innovation = y - h_x_0
         ls = innovation / C_yy
         ls = vjp_h_x_0(ls)[0]
         gs = s + ls
-        return gs
+        return jnp.squeeze(gs, axis=0)
 
-    return guidance_score
+    return vmap(guidance_score)
 
 
 def get_jacrev_guidance(

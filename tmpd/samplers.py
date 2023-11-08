@@ -81,7 +81,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='song2023plus':
         sampler = get_sampler(sampling_shape,
                               EulerMaruyama(sde.reverse(model).guide(
-                                  get_pseudo_inverse_guidance, observation_map, y, config.sampling.noise_std, 1.)),
+                                  get_pseudo_inverse_guidance, observation_map, y, config.sampling.noise_std)),
                                   # get_linear_inverse_guidance, observation_map, y, config.sampling.noise_std, 1.)),
                               inverse_scaler=inverse_scaler,
                               stack_samples=stack_samples,

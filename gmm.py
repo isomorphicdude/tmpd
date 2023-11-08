@@ -245,9 +245,16 @@ def main(argv):
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
                 cs_methods = ['Song2023', 'Chung2022', 'TMPD2023avjp', 'TMPD2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
                 cs_methods = ['chung2022plus', 'song2023plus', 'tmpd2023bvjpplus']
-                # cs_methods = ['tmpd2023avjp']
+
                 # cs_methods = ['song2023plus']
-                cs_methods = ['tmpd2023ajacfwd']
+                # cs_methods = ['tmpd2023ajacfwd']
+                # cs_methods = ['tmpd2023ajacrev']
+                # cs_methods = ['tmpd2023avjp']
+                # cs_methods = ['chung2022scalarplus']
+                # cs_methods = ['tmpd2023b']
+                # cs_methods = ['tmpd2023bvjpplus']
+                # cs_methods = ['tmpd2023bjacfwd']
+                # cs_methods = ['tmpd2023bvjp']
 
                 for cs_method in cs_methods:
                     config.sampling.cs_method = cs_method
