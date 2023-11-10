@@ -88,7 +88,7 @@ class KGDMVE(DDIMVE):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.observation_map = observation_map
         self.batch_observation_map  = vmap(observation_map)
@@ -204,7 +204,7 @@ class SSPiGDMVP(DDIMVP):
     PiGDM Song et al. 2023. Markov chain using the DDIM Markov Chain or VP SDE."""
     def __init__(self, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
         super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.y = y
         self.noise_std = noise_std
@@ -256,7 +256,7 @@ class PiGDMVE(DDIMVE):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.batch_observation_map = vmap(observation_map)
 
@@ -291,7 +291,7 @@ class DPSSMLD(SMLD):
         super().__init__(score, num_steps, dt, epsilon, sigma_min, sigma_max)
         self.scale = scale
         self.shape = shape
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
         self.likelihood_score = self.get_likelihood_score(y, self.estimate_h_x_0, shape)
 
     def get_likelihood_score(self, y, estimate_h_x_0, shape):
@@ -323,7 +323,7 @@ class DPSDDPM(DDPM):
         super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
         self.scale = scale
         self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(shape, observation_map)
-        self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(observation_map)
         self.likelihood_score = self.get_likelihood_score(y)
         self.likelihood_score_vmap = self.get_likelihood_score_vmap(y, shape)
 
@@ -368,7 +368,7 @@ class KPDDPM(DDPM):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(observation_map)
         self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(shape, observation_map)
         self.batch_analysis_vmap = vmap(self.analysis)
         self.observation_map = observation_map
@@ -442,7 +442,7 @@ class KPSMLD(SMLD):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0(shape, observation_map)
+        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
         self.batch_analysis = vmap(self.analysis)
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)

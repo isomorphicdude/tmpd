@@ -1,6 +1,6 @@
 """TMPD runlib."""
 import os
-import flax
+# import flax
 # import flax.jax_utils as flax_utils
 import jax
 import jax.numpy as jnp
@@ -25,6 +25,7 @@ from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from tmpd.samplers import get_cs_sampler
 from tmpd.inpainting import get_mask
 import matplotlib.pyplot as plt
+import time
 
 
 num_devices = 1
@@ -56,7 +57,7 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
     else:
       rng, sample_rng = jax.random.split(rng, 2)
 
-    q_samples, num_function_evaluations = sampler(sample_rng)
+    q_samples, _ = sampler(sample_rng)
     q_images = inverse_scaler(q_samples.copy())
     q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
   
@@ -147,6 +148,7 @@ def get_convolve_observation(rng, x, config):
 def image_grid(x, image_size, num_channels):
     img = x.reshape(-1, image_size, image_size, num_channels)
     w = int(np.sqrt(img.shape[0]))
+    img = img[:w**2, :, :, :]
     return img.reshape((w, w, image_size, image_size, num_channels)).transpose((0, 2, 1, 3, 4)).reshape((w * image_size, w * image_size, num_channels))
 
 
@@ -408,6 +410,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
                     'TMPD2023bvjpplus',
                     'chung2022scalarplus',  
                     'chung2022plus',  
+                    'kgdmveplus',
+                    'tmpd2023avjp',
+                    'tmpd2023ajvp'
+                    'tmpd2023ajacrev',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -418,7 +424,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
   ckpt = config.eval.begin_ckpt
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -580,13 +585,25 @@ def inpainting(config, workdir, eval_folder="eval"):
     else:
       # VE/SMLD methods with mask
       cs_methods = [
+                    # 'KPSMLDplus',
+                    # 'PiGDMVEplus',
+                    # 'DPSSMLDplus',
+                    # 'Song2023plus',
+                    # 'TMPD2023bvjpplus',
+                    # 'TMPD2023ajacrevplus',
+                    # 'chung2022plus',  
+                    # ]
                     'KPSMLDplus',
                     'PiGDMVEplus',
                     'DPSSMLDplus',
                     'Song2023plus',
                     'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
                     'chung2022plus',  
-                    ]
+                    'kgdmveplus',
+                    'tmpd2023avjp',
+                    'tmpd2023ajvp'
+                    'tmpd2023ajacrev']
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
@@ -596,7 +613,6 @@ def inpainting(config, workdir, eval_folder="eval"):
   ckpt = config.eval.begin_ckpt
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -663,8 +679,6 @@ def inpainting(config, workdir, eval_folder="eval"):
       adjoint_observation_map = lambda y: y
       H = None
 
-    cs_method = config.sampling.cs_method
-
     for cs_method in cs_methods:
       config.sampling.cs_method = cs_method
       if cs_method in ddim_methods:
@@ -676,15 +690,19 @@ def inpainting(config, workdir, eval_folder="eval"):
 
       rng, sample_rng = jax.random.split(rng, 2)
       if config.eval.pmap:
-        # sampler = jax.pmap(sampler, axis_name='batch')
+        sampler = jax.pmap(sampler, axis_name='batch')
         rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
         rng, sample_rng = jax.random.split(rng, 2)
 
-      q_samples, nfe = sampler(sample_rng)
+      time_prev = time.time()
+      q_samples, _ = sampler(sample_rng)
+      sample_time = time.time() - time_prev
+      print("{}: {}s".format(cs_method, sample_time))
+
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      print(q_samples, "\n{}".format(config.sampling.cs_method))
+      # print(q_samples, "\n{}".format(config.sampling.cs_method))
       plot_samples(
         q_samples,
         image_size=config.data.image_size,
@@ -711,7 +729,6 @@ def sample(config,
   rng = jax.random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
-  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
@@ -762,8 +779,8 @@ def sample(config,
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-  rsde = sde.reverse(score_fn)
-  drift, diffusion = rsde.sde(x_0, t_0)
+  # rsde = sde.reverse(score_fn)
+  # drift, diffusion = rsde.sde(x_0, t_0)
 
   sampler = get_sampler(
     (4, config.data.image_size, config.data.image_size, config.data.num_channels),

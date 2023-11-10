@@ -24,8 +24,10 @@ def main(argv):
 
     if FLAGS.mode == "sample":
         run_lib.sample(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
+    elif FLAGS.mode == "eval":
+        run_lib.evaluate(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
     elif FLAGS.mode == "inpainting":
-        run_lib.inverse_problem(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
+        run_lib.inpainting(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
     elif FLAGS.mode == "super_resolution":
         run_lib.super_resolution(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
     elif FLAGS.mode == "deblur":

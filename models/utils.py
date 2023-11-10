@@ -159,8 +159,8 @@ def get_epsilon_fn(sde, model, params, states, train=False, continuous=False, re
   elif isinstance(sde, VE):
     def epsilon_fn(x, t, rng=None):
       if continuous:
-        labels = sde.marginal_prob(jnp.zeros_like(x), t)[1]
-        std = sde.marginal_prob(jnp.zeros_like(x), t)[1]
+        labels = sde.std(t)
+        std = sde.std(t)
       else:
         # For VE-trained models, t=0 corresponds to the highest noise level
         labels = sde.T - t
@@ -208,7 +208,7 @@ def get_score_fn(sde, model, params, states, train=False, continuous=False, retu
         # continuously-trained models.
         labels = t * 999
         model, state = model_fn(x, labels, rng)
-        std = sde.marginal_prob(jnp.zeros_like(x), t)[1]
+        std = sde.std(t)
       else:
         # For VP-trained models, t=0 corresponds to the lowest noise level
         labels = t * (sde.N - 1)
@@ -224,7 +224,7 @@ def get_score_fn(sde, model, params, states, train=False, continuous=False, retu
   elif isinstance(sde, VE):
     def score_fn(x, t, rng=None):
       if continuous:
-        labels = sde.marginal_prob(jnp.zeros_like(x), t)[1]
+        labels = sde.std(t)
       else:
         # For VE-trained models, t=0 corresponds to the highest noise level
         labels = sde.T - t
