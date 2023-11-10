@@ -40,16 +40,20 @@ import torch
 from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
 import os
-
 from PIL import Image
+from tqdm import tqdm
+from inception import InceptionV3
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    # If not tqdm is not available, provide a mock version of it
-    def tqdm(x): return x
 
-from .inception import InceptionV3
+from absl import app
+from absl import flags
+from ml_collections.config_flags import config_flags
+FLAGS = flags.FLAGS
+config_flags.DEFINE_config_file(
+    "config", None, "Training configuration.", lock_config=True)
+flags.DEFINE_string("workdir", None, "Work directory.")
+flags.mark_flags_as_required(["workdir", "config"])
+
 
 def imread(filename):
     """
@@ -245,25 +249,64 @@ def get_fid(path1, path2):
                                           2048)
     return fid_value
 
+
 links = {
     'CIFAR10': 'http://bioinf.jku.at/research/ttur/ttur_stats/fid_stats_cifar10_train.npz',
-    'LSUN': 'http://bioinf.jku.at/research/ttur/ttur_stats/fid_stats_lsun_train.npz'
+    'LSUN': 'http://bioinf.jku.at/research/ttur/ttur_stats/fid_stats_lsun_train.npz',
+    'CELEBA': 'http://bioinf.jku.at/research/ttur/ttur_stats/fid_stats_celeba.npz',
 }
 
-def get_fid_stats_path(args, config, download=True):
+
+def get_fid_stats_path(workdir, config, download=True):
+
     if config.data.dataset == 'CIFAR10':
-        path = os.path.join(args.exp, 'datasets', 'cifar10_fid.npz')
+        path = os.path.join(workdir, 'datasets', 'cifar10_fid.npz')
         if not os.path.exists(path):
             if not download:
                 raise FileNotFoundError("no statistics file founded")
             else:
                 import urllib
+                path = os.path.join(workdir, 'cifar10_fid.npz')
                 urllib.request.urlretrieve(
                     links[config.data.dataset], path
                 )
     elif config.data.dataset == 'CELEBA':
-        path = os.path.join(args.exp, 'datasets', 'celeba_test_fid_stats.npz')
+        path = os.path.join(workdir, 'datasets', 'celeba_test_fid_stats.npz')
         if not os.path.exists(path):
-            raise FileNotFoundError('no statistics file founded')
+            if not download:
+                raise FileNotFoundError('no statistics file founded')
+            else:
+                import urllib
+                path = os.path.join(workdir, 'celeba_test_fid_stats.npz')
+                urllib.request.urlretrieve(
+                    links[config.data.dataset], path
+                )
+    elif config.data.dataset == 'LSUN':
+        path = os.path.join(workdir, 'datasets', 'lsun_test_fid_stats.npz')
+        if not os.path.exists(path):
+            if not download:
+                raise FileNotFoundError('no statistics file founded')
+            else:
+                import urllib
+                path = os.path.join(workdir, 'lsun_test_fid_stats.npz')
+                urllib.request.urlretrieve(
+                    links[config.data.dataset], path
+                )
 
     return path
+
+
+def main(argv):
+    path1 = get_fid_stats_path(FLAGS.workdir, FLAGS.config, download=True)
+    path2 = '/Users/ben/sync/ddrm-exp-datasets/ood_celeba/0'
+    # path2 = '/Users/ben/sync/ddrm-exp-datasets/ood_bedroom/0'
+    # path2 = '/Users/ben/sync/ddrm-exp-datasets/ood_church_outdoor/0'
+    # path2 = '/Users/ben/sync/ddrm-exp-datasets/ood/0'
+    paths = (path1, path2)
+    fid_value = calculate_fid_given_paths(paths, 50, False, 2048)
+    print('fid: {}'.format(fid_value))
+    # get_fid(path1, path2)
+
+
+if __name__ == "__main__":
+    app.run(main)
