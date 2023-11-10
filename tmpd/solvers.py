@@ -404,8 +404,8 @@ class KPDDPM(DDPM):
         m = self.sqrt_alphas_cumprod[timestep]
         v = self.sqrt_1m_alphas_cumprod[timestep]**2
         ratio = v / m
-        # x_dash = self.batch_analysis(x, t, timestep, ratio)
-        x_dash = self.batch_analysis_vmap(x, t, timestep, ratio)
+        x_dash = self.batch_analysis(x, t, timestep, ratio)
+        # x_dash = self.batch_analysis_vmap(x, t, timestep, ratio)
         alpha = self.alphas[timestep]
         m_prev = self.sqrt_alphas_cumprod_prev[timestep]
         v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
