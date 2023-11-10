@@ -177,7 +177,6 @@ def deblur(config, workdir, eval_folder="eval"):
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
-
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
                        model_state=init_model_state,
@@ -354,7 +353,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
-
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
                        model_state=init_model_state,
@@ -522,7 +520,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
 
 
 def inpainting(config, workdir, eval_folder="eval"):
-  jax.default_device = jax.devices()[0]
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
   # ... they must be all the same model of device for pmap to work
   num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
@@ -536,7 +533,6 @@ def inpainting(config, workdir, eval_folder="eval"):
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
-
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
                        model_state=init_model_state,
@@ -734,7 +730,6 @@ def sample(config,
   # Initialize model
   rng, model_rng = jax.random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
-
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
                        model_state=init_model_state,
