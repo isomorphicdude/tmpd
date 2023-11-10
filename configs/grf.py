@@ -22,7 +22,7 @@ def get_config():
     # sampling.cs_method = 'tmpd2023bvjpplus'
     # sampling.cs_method = 'tmpd2023bjacfwd'
     # sampling.cs_method = 'tmpd2023bvjp'
-    # sampling.cs_method = 'kpsmldplus'
+    sampling.cs_method = 'kpsmldplus'
 
     eval.pmap = True
     data.image_size = 32

@@ -262,7 +262,7 @@ class PiGDMVE(DDIMVE):
 
     def analysis(self, x, t, timestep, v):
         x = x.flatten()
-        r = v * self.data_variance / (variance + self.data_variance)
+        r = v * self.data_variance / (v + self.data_variance)
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
         h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
@@ -423,6 +423,18 @@ class KPDDPM(DDPM):
 
 class KPDDPMplus(KPDDPM):
     """Kalman posterior for DDPM Ancestral sampling."""
+    def batch_analysis(self, x, t, timestep, ratio):
+        # h_x_0, (_, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        h_x_0, vjp_h_x_0, (s, x_0) = vjp(
+            lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
+        diag = self.batch_observation_map(vjp_h_x_0(self.batch_observation_map(jnp.ones_like(x)))[0])
+        C_yy = diag + noise_std**2 / ratio
+        ls = vjp_h_x_0((self.y - h_x_0) / C_yy)[0]
+        print(ls.shape)
+        print(x_0.shape)
+        assert 0
+        return x_0 + ls
+
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0(x, t, timestep)
@@ -442,15 +454,35 @@ class KPSMLD(SMLD):
         self.noise_std = noise_std
         self.shape = shape
         self.num_y = y.shape[0]
-        self.estimate_h_x_0 = self.get_estimate_x_0_vmap(shape, observation_map)
-        self.batch_analysis = vmap(self.analysis)
+        self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
+        self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(shape, observation_map)
+        self.batch_analysis_vmap = vmap(self.analysis)
         self.observation_map = observation_map
         self.batch_observation_map = vmap(observation_map)
+        self.batch_batch_observation_map = vmap(vmap(observation_map))
+
+    def vec_jacrev(self, x, t):
+        return vmap(jacrev(lambda _x: self.estimate_h_x_0(jnp.expand_dims(_x, axis=0), t.reshape(1, 1))[0]))(x)
+
+    def batch_analysis(self, x, t, timestep, ratio):
+        h_x_0, (s, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        grad_H_x_0 = jnp.squeeze(vec_jacrev(x, t[0]), axis=(1))
+        H_grad_H_x_0 = self.batch_batch_observation_map(grad_H_x_0)
+        print(H_grad_H_x_0.shape)
+        Cyy = H_grad_H_x_0 + self.noise_std**2 / v * jnp.eye(self.num_y)
+        print(Cyy.shape)
+        innovation = self.y - h_x_0
+        f = batch_linalg_solve(Cyy, innovation)
+        ls = batch_matmul(jnp.transpose (grad_H_x_0, axes), f).reshape(s.shape)
+        print(ls.shape)
+        print(x_0.shape)
+        assert 0
+        return x_0 + ls
 
     def analysis(self, x, t, timestep, v):
         x = x.flatten()
-        h_x_0, (s, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
-        grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0(_x, t, timestep)[0])(x)
+        h_x_0, (s, x_0) = self.estimate_h_x_0_vmap(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
+        grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0_vmap(_x, t, timestep)[0])(x)
         H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
         Cyy = H_grad_H_x_0 + self.noise_std**2 / v * jnp.eye(self.num_y)
         innovation = self.y - h_x_0
@@ -463,6 +495,7 @@ class KPSMLD(SMLD):
         sigma = self.discrete_sigmas[timestep]
         sigma_prev = self.discrete_sigmas_prev[timestep]
         x_0 = self.batch_analysis(x, t, timestep, sigma**2)
+        # x_0 = self.batch_analysis_vmap(x, t, timestep, sigma**2)
         x_mean = batch_mul(sigma_prev**2 / sigma**2, x) + batch_mul(1 - sigma_prev**2 / sigma**2, x_0)
         std = jnp.sqrt((sigma_prev**2 * (sigma**2 - sigma_prev**2)) / (sigma**2))
         return x_mean, std
@@ -476,14 +509,20 @@ class KPSMLD(SMLD):
 
 
 class KPSMLDplus(KPSMLD):
-    """
-    Kalman posterior for DDPM Ancestral sampling.
-    """
+    """Kalman posterior for DDPM Ancestral sampling."""
+    def batch_analysis(self, x, t, timestep, ratio):
+        h_x_0, vjp_h_x_0, (s, x_0) = vjp(
+            lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
+        diag = self.batch_observation_map(vjp_h_x_0(self.batch_observation_map(jnp.ones_like(x)))[0])
+        C_yy = diag + self.noise_std**2 / ratio[0]
+        ls = vjp_h_x_0((self.y - h_x_0) / C_yy)[0]
+        return x_0 + ls
+ 
     def analysis(self, x, t, timestep, ratio):
         x = x.flatten()
         _estimate_h_x_0 = lambda x: self.estimate_h_x_0_vmap(x, t, timestep)
-        h_x_0, vjp_estimate_h_x_0, (_, x_0) = vjp(
+        h_x_0, vjp_h_x_0, (_, x_0) = vjp(
             _estimate_h_x_0, x, has_aux=True)
-        C_yy = self.observation_map(vjp_estimate_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
-        ls = vjp_estimate_h_x_0((self.y - h_x_0) / C_yy)[0]
+        C_yy = self.observation_map(vjp_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
+        ls = vjp_h_x_0((self.y - h_x_0) / C_yy)[0]
         return (x_0 + ls).reshape(self.shape)
