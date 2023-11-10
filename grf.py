@@ -207,8 +207,11 @@ def main(argv):
         mask = mask.at[idx_obs].set(1.0)
         y = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         y = y.at[idx_obs].set(y_data)
-        observation_map = lambda x: mask * x
-        adjoint_observation_map = lambda y: y
+        def observation_map(x):
+            x = x.flatten()
+            return mask * x
+        def adjoint_observation_map(y):
+            return y
     else:
         def observation_map(x):
             x = x.flatten()  # for newer methods

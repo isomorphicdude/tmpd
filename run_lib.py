@@ -297,8 +297,12 @@ def deblur(config, workdir, eval_folder="eval"):
       xs=jnp.array(xs), ys=jnp.array(ys))
 
     def observation_map(x):
+      print(x.shape)
       x = x.reshape(sampling_shape[1:])
+      print(x.shape)
       y = jax.image.resize(x, obs_shape, method)
+      print(y.shape)
+      assert 0
       return y.flatten()
 
     def adjoint_observation_map(x):
@@ -667,14 +671,17 @@ def inpainting(config, workdir, eval_folder="eval"):
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
       y = H @ mask_y
-      observation_map = lambda x: H @ x
+
+      def observation_map(x):
+          x = x.flatten()
+          return H @ x
       adjoint_observation_map = None
     else:
       y = mask_y
-      print(mask.shape)
-      assert 0
-      observation_map = lambda x: mask * x
-      adjoint_observation_map = lambda y: y
+      def observation_map(x):
+          x = x.flatten()
+          return mask * x
+      adjoint_observation_map = None
       H = None
 
     for cs_method in cs_methods:
