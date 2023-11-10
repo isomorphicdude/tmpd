@@ -675,6 +675,8 @@ def inpainting(config, workdir, eval_folder="eval"):
       adjoint_observation_map = None
     else:
       y = mask_y
+      print(mask.shape)
+      assert 0
       observation_map = lambda x: mask * x
       adjoint_observation_map = lambda y: y
       H = None
@@ -708,6 +710,7 @@ def inpainting(config, workdir, eval_folder="eval"):
         image_size=config.data.image_size,
         num_channels=config.data.num_channels,
         fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
+      assert 0
 
 
 def sample(config,
@@ -807,6 +810,10 @@ def evaluate(config,
     eval_folder: The subfolder for storing evaluation results. Default to
       "eval".
   """
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
+
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
