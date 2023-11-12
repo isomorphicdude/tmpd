@@ -27,7 +27,7 @@ def get_config():
     eval.pmap = True
     data.image_size = 32
     data.num_channels = 1
-    eval.batch_size = 9
+    eval.batch_size = 6
 
     training.sde = 'vpsde'
     training.num_epochs = 4000

@@ -70,7 +70,7 @@ def get_config():
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 1152
+  evaluate.batch_size = 64
   evaluate.pmap = True
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
