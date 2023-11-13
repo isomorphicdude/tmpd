@@ -19,15 +19,29 @@ def get_config():
     # sampling.cs_method = 'chung2022scalarplus'
     # sampling.cs_method = 'tmpd2023b'
     # sampling.cs_method = 'tmpd2023ajacfwd'
-    sampling.cs_method = 'tmpd2023bvjpplus'
+    # sampling.cs_method = 'tmpd2023bvjpplus'
     # sampling.cs_method = 'tmpd2023bjacfwd'
     # sampling.cs_method = 'tmpd2023bvjp'
     # sampling.cs_method = 'kpsmldplus'
+    # sampling.cs_method = 'kgdmvp'
+    # sampling.cs_method = 'kgdmvpplus'
+    # sampling.cs_method = 'kgdmve'
+    # sampling.cs_method = 'kgdmveplus'
+    # sampling.cs_method = 'pigdmvp'
+    # sampling.cs_method = 'pigdmvpplus'
+    # sampling.cs_method = 'pigdmve'
+    # sampling.cs_method = 'pigdmveplus'
+    # sampling.cs_method = 'dpssmld'
+    # sampling.cs_method = 'dpssmldplus'
+    # sampling.cs_method = 'kpddpm'
+    # sampling.cs_method = 'kpddpmplus'
+    # sampling.cs_method = 'kpsmld'
+    sampling.cs_method = 'kpsmldplus'
 
     eval.pmap = True
     data.image_size = 32
     data.num_channels = 1
-    eval.batch_size = 6
+    eval.batch_size = 1
 
     training.sde = 'vpsde'
     training.num_epochs = 4000
