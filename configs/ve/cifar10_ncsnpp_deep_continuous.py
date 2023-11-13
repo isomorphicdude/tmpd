@@ -61,7 +61,8 @@ def get_config():
   # optim
   config.seed = 2023
 
-  sampling.cs_method = 'TMPD2023bvjpplus'
+  # sampling.cs_method = 'tmpd2023bvjpplus'
+  sampling.cs_method = 'tmpd2023avjp'
 
   sampling.noise_std = 0.01
   sampling.denoise = True  # work out what denoise_override is
@@ -70,8 +71,8 @@ def get_config():
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 64
-  evaluate.pmap = True
+  evaluate.batch_size = 1
+  evaluate.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
   # solver.outer_solver = 'DDIMVE'

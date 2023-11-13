@@ -37,43 +37,112 @@ ddim_methods = ['PiGDMVP', 'PiGDMVE', 'PiGDMVPplus', 'PiGDMVEplus',
   'KGDMVP', 'KGDMVE', 'KGDMVPplus', 'KGDMVEplus']
 markov_methods = ['KPDDPM', 'KPDDPMplus', 'KPSMLD', 'KPSMLDplus']
 
+from glob import glob
+from PIL import Image
+from typing import Callable, Optional
+from torch.utils.data import DataLoader
+from torchvision.datasets import VisionDataset
+import torchvision.transforms as transforms
+
+
+__DATASET__ = {}
+
+def register_dataset(name: str):
+    def wrapper(cls):
+        if __DATASET__.get(name, None):
+            raise NameError(f"Name {name} is already registered!")
+        __DATASET__[name] = cls
+        return cls
+    return wrapper
+
+
+def get_dataset(name: str, root: str, **kwargs):
+    if __DATASET__.get(name, None) is None:
+        raise NameError(f"Dataset {name} is not defined.")
+    return __DATASET__[name](root=root, **kwargs)
+
+
+def get_dataloader(dataset: VisionDataset,
+                   batch_size: int, 
+                   num_workers: int, 
+                   train: bool):
+    dataloader = DataLoader(dataset, 
+                            batch_size, 
+                            shuffle=train, 
+                            num_workers=num_workers, 
+                            drop_last=train)
+    return dataloader
+
+
+@register_dataset(name='ffhq')
+class FFHQDataset(VisionDataset):
+    def __init__(self, root: str, transforms: Optional[Callable]=None):
+        super().__init__(root, transforms)
+
+        self.fpaths = sorted(glob(root + '/**/*.png', recursive=True))
+        assert len(self.fpaths) > 0, "File list is empty. Check the root."
+
+    def __len__(self):
+        return len(self.fpaths)
+
+    def __getitem__(self, index: int):
+        fpath = self.fpaths[index]
+        img = Image.open(fpath).convert('RGB')
+        
+        if self.transforms is not None:
+            img = self.transforms(img)
+        
+        return img
+
+
+def get_asset_sample(config):
+  transform = transforms.Compose([transforms.ToTensor(),
+                                  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+  dataset = get_dataset(config.data.dataset.lower(),
+                        root='./assets/',
+                        transforms=transform)
+  loader = get_dataloader(dataset, batch_size=1, num_workers=0, train=False)
+  ref_img = next(enumerate(loader))
+  ref_img = ref_img.detach().cpu().numpy()[0].transpose(1, 2, 0)
+  return ref_img
+
 
 def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder):
-    if config.solver.outer_solver in unconditional_ddim_methods:
-      outer_solver = get_ddim_chain(config, epsilon_fn)
-    elif config.solver.outer_solver in unconditional_markov_methods:
-      outer_solver = get_markov_chain(config, score_fn)
-    else:
-      outer_solver, _ = get_solver(config, sde, score_fn)
+  if config.solver.outer_solver in unconditional_ddim_methods:
+    outer_solver = get_ddim_chain(config, epsilon_fn)
+  elif config.solver.outer_solver in unconditional_markov_methods:
+    outer_solver = get_markov_chain(config, score_fn)
+  else:
+    outer_solver, _ = get_solver(config, sde, score_fn)
 
-    sampler = get_sampler(
-      sampling_shape,
-      outer_solver, inverse_scaler=None)
+  sampler = get_sampler(
+    sampling_shape,
+    outer_solver, inverse_scaler=None)
 
-    if config.eval.pmap:
-      sampler = jax.pmap(sampler, axis_name='batch')
-      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-      sample_rng = jnp.asarray(sample_rng)
-    else:
-      rng, sample_rng = jax.random.split(rng, 2)
+  if config.eval.pmap:
+    sampler = jax.pmap(sampler, axis_name='batch')
+    rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+    sample_rng = jnp.asarray(sample_rng)
+  else:
+    rng, sample_rng = jax.random.split(rng, 2)
 
-    q_samples, _ = sampler(sample_rng)
-    q_images = inverse_scaler(q_samples.copy())
-    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-  
-    plot_samples(
-      inverse_scaler(q_images),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
+  q_samples, _ = sampler(sample_rng)
+  q_images = inverse_scaler(q_samples.copy())
+  q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
 
-    plot_samples(
-      inverse_scaler(q_images[0]),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
+  plot_samples(
+    inverse_scaler(q_images),
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
 
-    return q_samples[0]
+  plot_samples(
+    inverse_scaler(q_images[0]),
+    image_size=config.data.image_size,
+    num_channels=config.data.num_channels,
+    fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
+
+  return q_samples[0]
 
 
 def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
@@ -106,14 +175,14 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
 def get_inpainting_observation(rng, x, config, mask_name='square'):
   " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
   mask, num_obs = get_mask(config.data.image_size, mask_name)
-  y = x + jax.random.normal(rng, x.shape) * jnp.sqrt(config.sampling.noise_std)
+  y = x + jax.random.normal(rng, x.shape) * config.sampling.noise_std
   y = y * mask
   return y, mask, num_obs
 
 
 def get_superresolution_observation(rng, x, config, shape, method='square'):
   y = jax.image.resize(x, shape, method)
-  y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
+  y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
   return y, num_obs
 
@@ -140,7 +209,7 @@ def get_convolve_observation(rng, x, config):
   y = jnp.transpose(y, [0, 2, 3, 1])
   y = y[0]
   print("out", y.shape)
-  # y = y + jax.random.normal(rng, y.shape) * jnp.sqrt(config.sampling.noise_std)
+  # y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
   return y, num_obs
 
@@ -513,7 +582,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
       else:
         rng, sample_rng = jax.random.split(rng, 2)
 
-      q_samples, nfe = sampler(sample_rng)
+      q_samples, _ = sampler(sample_rng)
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
       print(q_samples, "\nconfig.sampling.cs_method")
       plot_samples(
@@ -575,13 +644,18 @@ def inpainting(config, workdir, eval_folder="eval"):
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'TMPD2023ajvp',
-                    'TMPD2023b',
-                    'Song2023',
-                    'Chung2022',  
-                    'PiGDMVE',
-                    'KPSMLD'
-                    'DPSSMLD']
+                    # 'KPSMLD',
+                    # 'TMPD2023avjp',
+                    # 'TMPD2023ajacrev',
+                    'TMPD2023ajacfwd',
+                    # 'TMPD2023b',
+                    # 'Song2023',
+                    # 'Chung2022',  
+                    # 'PiGDMVE',
+                    # 'KGDMVE',
+                    # 'KPSMLD'
+                    # 'DPSSMLD'
+                    ]
     else:
       # VE/SMLD methods with mask
       cs_methods = [
@@ -590,20 +664,15 @@ def inpainting(config, workdir, eval_folder="eval"):
                     # 'DPSSMLDplus',
                     # 'Song2023plus',
                     # 'TMPD2023bvjpplus',
-                    # 'TMPD2023ajacrevplus',
+                    'TMPD2023ajacrevplus',
                     # 'chung2022plus',  
-                    # ]
-                    'KPSMLDplus',
-                    'PiGDMVEplus',
-                    'DPSSMLDplus',
-                    'Song2023plus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'chung2022plus',  
-                    'kgdmveplus',
-                    'tmpd2023avjp',
-                    'tmpd2023ajvp'
-                    'tmpd2023ajacrev']
+                    # 'chung2022scalarplus',  
+                    # 'KGDMVEplus',
+                    # 'KPSMLDplus',
+                    # 'PiGDMVEplus',
+                    # 'DPSSMLDplus',
+                    # 'Song2023plus',
+                    ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
@@ -641,9 +710,10 @@ def inpainting(config, workdir, eval_folder="eval"):
     noise_std=config.sampling.noise_std)
   for i in range(num_examples):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
-    x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    x = get_asset_sample(config)
     x = x.flatten()
-    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
+    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -661,6 +731,7 @@ def inpainting(config, workdir, eval_folder="eval"):
     np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
       config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
       xs=jnp.array(xs), ys=jnp.array(ys))
+    assert 0
 
     if 'plus' not in config.sampling.cs_method:
       logging.warning(

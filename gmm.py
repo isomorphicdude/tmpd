@@ -255,6 +255,7 @@ def main(argv):
                 # cs_methods = ['tmpd2023bvjpplus']
                 # cs_methods = ['tmpd2023bjacfwd']
                 # cs_methods = ['tmpd2023bvjp']
+                cs_methods = ['KGDMVP']
 
                 for cs_method in cs_methods:
                     config.sampling.cs_method = cs_method

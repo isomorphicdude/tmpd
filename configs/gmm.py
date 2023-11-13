@@ -1,5 +1,4 @@
 """Config for `gmm.py`."""
-
 from configs.default_cs_configs import get_default_configs
 
 

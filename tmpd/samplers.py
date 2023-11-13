@@ -142,7 +142,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         # https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
         # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L86
         # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L2[…]C47
-        outer_solver = DPSDDPMplus(dps_scale_hyperparameter, y, observation_map, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSDDPMplus(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
@@ -150,7 +150,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpsddpm':
         score = model
         # Reproduce DPS (Chung et al. 2022) paper for VP SDE
-        outer_solver = DPSDDPM(dps_scale_hyperparameter, y, observation_map, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSDDPM(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
@@ -158,7 +158,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpssmldplus':
         # Reproduce DPS (Chung et al. 2022) paper for VE SDE
         score = model
-        outer_solver = DPSSMLDplus(dps_scale_hyperparameter, y, observation_map, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSSMLDplus(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
@@ -166,28 +166,28 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpssmld':
         # Reproduce DPS (Chung et al. 2022) paper for VE SDE
         score = model
-        outer_solver = DPSSMLD(dps_scale_hyperparameter, y, observation_map, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSSMLD(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kpddpm':
         score = model
-        outer_solver = KPDDPM(y, observation_map, config.sampling.noise_std, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = KPDDPM(y, observation_map, config.sampling.noise_std, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kpsmld':
         score = model
-        outer_solver = KPSMLD(y, observation_map, config.sampling.noise_std, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = KPSMLD(y, observation_map, config.sampling.noise_std, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kpddpmplus':
         score = model
-        outer_solver = KPDDPMplus(y, observation_map, config.sampling.noise_std, sampling_shape, score, num_steps=config.solver.num_outer_steps,
+        outer_solver = KPDDPMplus(y, observation_map, config.sampling.noise_std, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
@@ -201,7 +201,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='pigdmvp':
         # Reproduce PiGDM (Chung et al. 2022) paper for VP SDE
-        outer_solver = PiGDMVP(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = PiGDMVP(y, observation_map, config.sampling.noise_std, sampling_shape[:1], model, num_steps=config.solver.num_outer_steps,
                                dt=config.solver.dt, epsilon=config.solver.epsilon,
                                data_variance=1.0,
                                beta_min=config.model.beta_min,
@@ -209,7 +209,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='pigdmve':
         # Reproduce PiGDM (Chung et al. 2022) paper for VE SDE
-        outer_solver = PiGDMVE(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = PiGDMVE(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                                dt=config.solver.dt, epsilon=config.solver.epsilon,
                                data_variance=1.0,
                                sigma_min=config.model.sigma_min,
@@ -217,38 +217,38 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='pigdmvpplus':
         # Reproduce PiGDM (Chung et al. 2022) paper for VP SDE
-        outer_solver = PiGDMVPplus(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = PiGDMVPplus(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='pigdmveplus':
         # Reproduce PiGDM (Chung et al. 2022) paper for VE SDE
-        outer_solver = PiGDMVEplus(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = PiGDMVEplus(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kgdmvp':
-        outer_solver = KGDMVP(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = KGDMVP(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kgdmve':
-        outer_solver = KGDMVE(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = KGDMVE(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kgdmvpplus':
-        outer_solver = KGDMVPplus(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = KGDMVPplus(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kgdmveplus':
-        outer_solver = KGDMVEplus(y, observation_map, config.sampling.noise_std, sampling_shape, model, num_steps=config.solver.num_outer_steps,
+        outer_solver = KGDMVEplus(y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)

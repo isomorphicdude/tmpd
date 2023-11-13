@@ -70,7 +70,11 @@ def get_config():
   config.seed = 23  #223
   sampling.cs_method = 'TMPD2023bvjpplus'
 
-  sampling.noise_std = 0.005
+  sampling.noise_std = 0.0001953125
+  # sampling.noise_std = 0.0001953125
+  sampling.noise_std = 0.000390625
+  # sampling.noise_std = 0.0025
+  # sampling.noise_std = 0.005
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
