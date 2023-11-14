@@ -61,8 +61,8 @@ def get_config():
   # optim
   config.seed = 2023
 
-  # sampling.cs_method = 'tmpd2023bvjpplus'
-  sampling.cs_method = 'tmpd2023avjp'
+  sampling.cs_method = 'tmpd2023bvjpplus'
+  # sampling.cs_method = 'tmpd2023avjp'
 
   sampling.noise_std = 0.01
   sampling.denoise = True  # work out what denoise_override is

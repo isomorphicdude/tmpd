@@ -11,7 +11,7 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file(
     "config", None, "Training configuration.", lock_config=True)
 flags.DEFINE_string("workdir", None, "Work directory.")
-flags.DEFINE_enum("mode", None, ["sample", "inpainting", "super_resolution", "deblur"],
+flags.DEFINE_enum("mode", None, ["eval", "sample", "inpainting", "super_resolution", "deblur"],
                   "Running mode: sample, inpainting, super_resolution or deblur")
 flags.DEFINE_string("eval_folder", "eval",
                     "The folder name for storing evaluation results")

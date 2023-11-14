@@ -32,10 +32,12 @@ from tmpd.solvers import (
 
 
 # https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
-dps_scale_hyperparameter = 0.4
+dps_scale_hyperparameter = 0.1
+# dps_scale_hyperparameter = 0.4
+# dps_scale_hyperparameter = 10.0
 
 
-def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y, H, observation_map, adjoint_observation_map, stack_samples=False):
+def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, observation_map, adjoint_observation_map, stack_samples=False):
     """Create a sampling function
 
     Args:
@@ -142,7 +144,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
         # https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
         # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L86
         # https://github.com/DPS2022/diffusion-posterior-sampling/blob/effbde7325b22ce8dc3e2c06c160c021e743a12d/guided_diffusion/condition_methods.py#L2[…]C47
-        outer_solver = DPSDDPMplus(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSDDPMplus(dps_scale_hyperparameter, y, observation_map, score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
@@ -150,7 +152,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpsddpm':
         score = model
         # Reproduce DPS (Chung et al. 2022) paper for VP SDE
-        outer_solver = DPSDDPM(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSDDPM(dps_scale_hyperparameter, y, observation_map, score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
@@ -158,7 +160,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpssmldplus':
         # Reproduce DPS (Chung et al. 2022) paper for VE SDE
         score = model
-        outer_solver = DPSSMLDplus(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSSMLDplus(dps_scale_hyperparameter, y, observation_map, score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
@@ -166,7 +168,7 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, num_y,
     elif config.sampling.cs_method.lower()=='dpssmld':
         # Reproduce DPS (Chung et al. 2022) paper for VE SDE
         score = model
-        outer_solver = DPSSMLD(dps_scale_hyperparameter, y, observation_map, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+        outer_solver = DPSSMLD(dps_scale_hyperparameter, y, observation_map, score, num_steps=config.solver.num_outer_steps,
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
