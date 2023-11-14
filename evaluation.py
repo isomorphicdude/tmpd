@@ -24,14 +24,26 @@ def get_inception_model(inceptionv3=False):
     return tfhub.load(INCEPTION_TFHUB)
 
 
+def load_fid_stats(config):
+  """Load the pre-computed dataset statistics."""
+  if config.data.dataset == 'CIFAR10':
+    filename = 'assets/fid_stats_cifar10.npz'
+  elif config.data.dataset == 'CELEBA':
+    filename = 'assets/fid_stats_celeba.npz'
+  elif config.data.dataset == 'LSUN':
+    filename = f'assets/fid_stats_lsun.npz'
+  else:
+    raise ValueError(f'Dataset {config.data.dataset} stats not found.')
+
+  with tf.io.gfile.GFile(filename, 'rb') as fin:
+    stats = np.load(fin)
+    return stats
+
+
 def load_dataset_stats(config):
   """Load the pre-computed dataset statistics."""
   if config.data.dataset == 'CIFAR10':
     filename = 'assets/cifar10_stats.npz'
-  elif config.data.dataset == 'CELEBA':
-    filename = 'assets/celeba_stats.npz'
-  elif config.data.dataset == 'LSUN':
-    filename = f'assets/lsun_stats.npz'
   else:
     raise ValueError(f'Dataset {config.data.dataset} stats not found.')
 

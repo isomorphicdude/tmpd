@@ -955,7 +955,7 @@ def evaluate(config,
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    # 'KPSMLDplus',
+                    'KPSMLDplus',
                     # 'PiGDMVEplus',
                     'DPSSMLDplus',
                     # 'Song2023plus',
@@ -998,7 +998,7 @@ def evaluate(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 0
+  num_sampling_rounds = 10
   xs = []
   ys = []
   np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
@@ -1109,6 +1109,10 @@ def evaluate(config,
       config.sampling.noise_std, config.data.dataset, config.sampling.cs_method)
     eval_path = eval_folder + eval_file
     # Compute inception scores, FIDs and KIDs.
+    # Load pre-computed dataset statistics.
+    data_stats = load_dataset_stats(config)
+    data_pools = data_stats["pool_3"]
+
     # Load all statistics that have been previously computed and saved
     all_logits = []
     all_pools = []
@@ -1122,8 +1126,22 @@ def evaluate(config,
           all_logits.append(stat["logits"])
         all_pools.append(stat["pool_3"])
 
-    print(len(all_logits))
-    print(len(all_pools))
+      # Compute FID/KID/IS on individual inverse problem
+      if not inceptionv3:
+        _inception_score = tfgan.eval.classifier_score_from_logits(all_logits)
+      else:
+        _inception_score = -1
+      _fid = tfgan.eval.frechet_classifier_distance_from_activations(
+        data_pools, stat["pool_3"])
+      # Hack to get tfgan KID work for eager execution.
+      _tf_data_pools = tf.convert_to_tensor(data_pools)
+      _tf_all_pools = tf.convert_to_tensor(stat["pool_3"])
+      _kid = tfgan.eval.kernel_classifier_distance_from_activations(
+        tf_data_pools, tf_all_pools).numpy()
+      del _tf_data_pools, _tf_all_pools
+      logging.info("cs_method-{} problem-{} - inception_score: {:6e}, FID: {:6e}, KID: {:6e}".format(
+          cs_method, i, _inception_score, _fid, _kid))
+
     if not inceptionv3:
       if len(all_logits) != 1:
         all_logits = np.concatenate(all_logits, axis=0)
@@ -1136,12 +1154,6 @@ def evaluate(config,
 
     print(all_logits.shape)
     print(all_pools.shape)
-    # Load pre-computed dataset statistics.
-    data_stats = load_dataset_stats(config)
-    print(data_stats)
-    print(data_stats.files)
-    assert 0
-    data_pools = data_stats["pool_3"]
 
     # Compute FID/KID/IS on all samples together.
     if not inceptionv3:
@@ -1158,7 +1170,7 @@ def evaluate(config,
       tf_data_pools, tf_all_pools).numpy()
     del tf_data_pools, tf_all_pools
 
-    logging.info("cs_method-{} --- inception_score: {%.6e}, FID: {%.6e}, KID: {%.6e}".format(
+    logging.info("cs_method-{} - inception_score: {:6e}, FID: {:6e}, KID: {:6e}".format(
         cs_method, inception_score, fid, kid))
 
     np.savez_compressed(
