@@ -71,13 +71,15 @@ def get_config():
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 256
-  evaluate.pmap = False
+  evaluate.batch_size = 384
+  evaluate.pmap = True
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
   # solver.outer_solver = 'DDIMVE'
   # solver.outer_solver = 'SMLD'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter
+# https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
+  solver.dps_scale_hyperparameter = 0.1
 
   return config

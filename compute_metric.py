@@ -3,7 +3,6 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import mean_squared_error as mse
 from tqdm import tqdm
-
 import matplotlib.pyplot as plt
 import lpips
 import numpy as np
@@ -53,6 +52,10 @@ for idx in tqdm(range(10)):
     label = plt.imread(label_root / f'orig_{fname}.png')[:, :, :3]
     delta_recon = plt.imread(delta_recon_root / f'orig_{fname}.png')[:, :, :3]
     normal_recon = plt.imread(normal_recon_root / f'orig_{fname}.png')[:, :, :3]
+    print(label)
+    print(delta_recon)
+    print(normal_recon)
+    assert 0
 
     psnr_delta = psnr(label, delta_recon)
     psnr_normal = psnr(label, normal_recon)

@@ -37,6 +37,8 @@ setup(
         'scipy',
         'h5py',
         'matplotlib',
+        'scikit-image',
+        'lpips',
         'absl-py==0.10.0',
         'flax==0.3.3',
         'diffusionjax',

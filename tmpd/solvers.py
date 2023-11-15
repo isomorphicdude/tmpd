@@ -311,8 +311,8 @@ class PiGDMVE(DDIMVE):
     timestep = (t * (self.num_steps - 1) / self.t1).astype(jnp.int32)
     sigma = self.discrete_sigmas[timestep]
     sigma_prev = self.discrete_sigmas_prev[timestep]
-    x_0, ls, epsilon = self.batch_analysis(self.y, x, t, timestep, sigma**2)
-    # x_0, ls, epsilon = self.batch_analysis_vmap(self.y, x, t, timestep, sigma**2)
+    # x_0, ls, epsilon = self.batch_analysis(self.y, x, t, timestep, sigma**2)
+    x_0, ls, epsilon = self.batch_analysis_vmap(self.y, x, t, timestep, sigma**2)
     coeff1 = self.eta * jnp.sqrt((sigma_prev**2 * (sigma**2 - sigma_prev**2)) / (sigma**2))
     coeff2 = jnp.sqrt(sigma_prev**2  - coeff1**2)
     x_mean = x_0 + batch_mul(coeff2, epsilon) + ls
@@ -327,7 +327,7 @@ class PiGDMVEplus(PiGDMVE):
       lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
     # Value suggested for VPSDE in original PiGDM paper
     r = v * self.data_variance  / (v + self.data_variance)
-    C_yy = r + self.noise_std**2
+    C_yy = 1. + self.noise_std**2 / r
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0.squeeze(axis=0), ls, epsilon.squeeze(axis=0)
 
@@ -336,7 +336,7 @@ class PiGDMVEplus(PiGDMVE):
       lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
     # Value suggested for VPSDE in original PiGDM paper
     r = v[0] * self.data_variance  / (v[0] + self.data_variance)
-    C_yy = r + self.noise_std**2
+    C_yy = 1. + self.noise_std**2 / r
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0, ls, epsilon
 
