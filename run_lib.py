@@ -8,7 +8,7 @@ import time
 import flax.jax_utils as flax_utils
 import jax
 import jax.numpy as jnp
-from jax import lax
+from jax import lax, vmap
 import jax.scipy as jsp
 import numpy as np
 import tensorflow as tf
@@ -32,6 +32,7 @@ from tmpd.inpainting import get_mask
 import matplotlib.pyplot as plt
 
 
+batch_flatten = vmap(lambda x: x.flatten())
 num_devices = 1
 
 
@@ -108,6 +109,7 @@ def get_asset_sample(config):
   loader = get_dataloader(dataset, batch_size=1, num_workers=0, train=False)
   ref_img = next(enumerate(loader))
   ref_img = ref_img.detach().cpu().numpy()[0].transpose(1, 2, 0)
+  ref_img = np.tile(ref_img, (config.eval.batch_size, 1, 1, 1))
   return ref_img
 
 
@@ -146,7 +148,7 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
 
-  return q_samples[0]
+  return q_samples
 
 
 def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
@@ -168,15 +170,16 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder):
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
 
-  return eval_batch['image'][0, 0]
+  return eval_batch['image'][0]
 
 
 def get_inpainting_observation(rng, x, config, mask_name='square'):
   " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
+  x = batch_flatten(x)
   mask, num_obs = get_mask(config.data.image_size, mask_name)
   y = x + jax.random.normal(rng, x.shape) * config.sampling.noise_std
   y = y * mask
-  return y, mask, num_obs
+  return x, y, mask, num_obs
 
 
 def get_superresolution_observation(rng, x, config, shape, method='square'):
@@ -659,9 +662,9 @@ def inpainting(config, workdir, eval_folder="eval"):
       # VE/SMLD methods with mask
       cs_methods = [
                     # 'KGDMVEplus',
-                    # 'KPSMLDplus',
+                    'KPSMLDplus',
                     # 'PiGDMVEplus',
-                    'DPSSMLDplus',
+                    # 'DPSSMLDplus',
                     # 'Song2023plus',
                     # 'TMPD2023bvjpplus',
                     # 'TMPD2023ajacrevplus',
@@ -707,8 +710,7 @@ def inpainting(config, workdir, eval_folder="eval"):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-    x = x.flatten()
-    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x, mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -778,7 +780,6 @@ def inpainting(config, workdir, eval_folder="eval"):
         image_size=config.data.image_size,
         num_channels=config.data.num_channels,
         fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
-      assert 0
 
 
 def sample(config,
@@ -955,19 +956,15 @@ def evaluate(config,
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'KPSMLDplus',
-                    # 'PiGDMVEplus',
                     'DPSSMLDplus',
-                    # 'Song2023plus',
-                    # 'TMPD2023bvjpplus',
+                    'KPSMLDplus',
+                    'KGDMVEplus',
+                    'PiGDMVEplus',
+                    'Song2023plus',
+                    'TMPD2023bvjpplus',
                     # 'TMPD2023ajacrevplus',
                     # 'chung2022plus',  
-                    # 'chung2022scalarplus',  
-                    # 'KGDMVEplus',
-                    # 'KPSMLDplus',
-                    # 'PiGDMVEplus',
-                    # 'DPSSMLDplus',
-                    # 'Song2023plus',
+                    'chung2022scalarplus',  
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -1009,11 +1006,16 @@ def evaluate(config,
   inceptionv3 = config.data.image_size >= 256
   inception_model = get_inception_model(inceptionv3=inceptionv3)
   for i in range(num_sampling_rounds):
-    batch = next(eval_iter)
-    eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
-    x = eval_batch['image'][0, 0]
-    x = x.flatten()
-    mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    # x = get_asset_sample(config)
+
+    # batch = next(eval_iter)
+    # eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
+    # print(eval_batch['image'][0].shape)
+    # x = eval_batch['image'][0, 0]
+
+    x, mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -1119,38 +1121,42 @@ def evaluate(config,
 
     stats = tf.io.gfile.glob(os.path.join(eval_folder, eval_file + "_stats_*.npz"))
 
-    for stat_file in stats:
+    for i, stat_file in enumerate(stats):
       with tf.io.gfile.GFile(stat_file, "rb") as fin:
         stat = np.load(fin)
+        tmp_logits = stat["logits"]
+        tmp_pools = stat["pool_3"]
         if not inceptionv3:
-          all_logits.append(stat["logits"])
-        all_pools.append(stat["pool_3"])
+          all_logits.append(tmp_logits)
+        all_pools.append(tmp_pools)
 
-      # Compute FID/KID/IS on individual inverse problem
-      if not inceptionv3:
-        _inception_score = tfgan.eval.classifier_score_from_logits(all_logits)
-      else:
-        _inception_score = -1
-      _fid = tfgan.eval.frechet_classifier_distance_from_activations(
-        data_pools, stat["pool_3"])
-      # Hack to get tfgan KID work for eager execution.
-      _tf_data_pools = tf.convert_to_tensor(data_pools)
-      _tf_all_pools = tf.convert_to_tensor(stat["pool_3"])
-      _kid = tfgan.eval.kernel_classifier_distance_from_activations(
-        tf_data_pools, tf_all_pools).numpy()
-      del _tf_data_pools, _tf_all_pools
-      logging.info("cs_method-{} problem-{} - inception_score: {:6e}, FID: {:6e}, KID: {:6e}".format(
-          cs_method, i, _inception_score, _fid, _kid))
+      # must have rank 2 
+      if tmp_pools.shape[0] > 1:
+        # Compute FID/KID/IS on individual inverse problem
+        if not inceptionv3:
+          _inception_score = tfgan.eval.classifier_score_from_logits(tmp_logits)
+        else:
+          _inception_score = -1
+        _fid = tfgan.eval.frechet_classifier_distance_from_activations(
+          data_pools, tmp_pools)
+        # Hack to get tfgan KID work for eager execution.
+        _tf_data_pools = tf.convert_to_tensor(data_pools)
+        _tf_tmp_pools = tf.convert_to_tensor(tmp_pools)
+        _kid = tfgan.eval.kernel_classifier_distance_from_activations(
+          _tf_data_pools, _tf_tmp_pools).numpy()
+        del _tf_data_pools, _tf_tmp_pools
+        logging.info("cs_method-{} problem-{} - inception_score: {:6e}, FID: {:6e}, KID: {:6e}".format(
+            cs_method, i, _inception_score, _fid, _kid))
 
     if not inceptionv3:
       if len(all_logits) != 1:
         all_logits = np.concatenate(all_logits, axis=0)
       else:
-        all_logits = np.array(all_logits)
+        all_logits = np.array(all_logits[0])
     if len(all_pools) != 1:
       all_pools = np.concatenate(all_pools, axis=0)
     else:
-      all_pools = np.array(all_logits)
+      all_pools = np.array(all_pools[0])
 
     print(all_logits.shape)
     print(all_pools.shape)

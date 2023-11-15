@@ -57,6 +57,10 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
         A function that takes random states and a replicated training state and outputs samples with the
         trailing dimensions matching `shape`.
     """
+    # check that y is batched
+    print(y.shape[0])
+    print(sampling_shape[0])
+
     if config.sampling.cs_method.lower()=='chung2022scalar' or config.sampling.cs_method.lower()=='chung2022scalarplus':
         scale = config.solver.num_outer_steps * 1.
         sampler = get_sampler(sampling_shape,
