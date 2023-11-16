@@ -37,7 +37,13 @@ from torchvision.datasets import VisionDataset
 import torchvision.transforms as transforms
 import torch
 import lpips
+import time
 
+logging.basicConfig(filename=str(float(time.time())) + ".log",
+                    filemode='a',
+                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.DEBUG)
 
 mse_vmap = vmap(lambda a, b: jnp.mean((a - b)**2))
 flatten_vmap = vmap(lambda x: x.flatten())
@@ -171,8 +177,7 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices):
                         
   eval_iter = iter(eval_ds)
   batch = next(eval_iter)
-  batch = next(eval_iter)
-  # for i, batch in enumerate(eval_iter): #   for i in batch: print(i)
+  # TODO: can tree_map be used to pmap across data?
   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
 
   plot_samples(
@@ -181,6 +186,7 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices):
     num_channels=config.data.num_channels,
     fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
 
+  # return eval_batch['image'].reshape(config.eval.batch_size, config.data.image_size, config.data.image_size, config.data.num_channels)
   return eval_batch['image'][0]
 
 
@@ -197,7 +203,10 @@ def get_superresolution_observation(rng, x, config, shape, method='square'):
   y = jax.image.resize(x, shape, method)
   y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
-  return y, num_obs
+  y = flatten_vmap(y)
+  x = flatten_vmap(x)
+  mask = None  # TODO
+  return x, y, mask, num_obs
 
 
 def get_convolve_observation(rng, x, config):
@@ -244,7 +253,7 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     plt.close()
 
 
-def plot(train_data, mean, std,
+def plot(train_data, mean, std, xlabel='x', ylabel='y',
          fname="plot.png"):
   BG_ALPHA = 1.0
   MG_ALPHA = 1.0
@@ -257,10 +266,12 @@ def plot(train_data, mean, std,
       X.flatten(), mean - 2. * std,
       mean + 2. * std, alpha=FG_ALPHA, color="blue")
   ax.set_xlim((X[0], X[-1]))
-  # ax.set_ylim((-2.4, 2.4))
+  # ax.set_ylim((, ))
   ax.grid(visible=True, which='major', linestyle='-')
   ax.set_xlabel('x', fontsize=10)
   ax.set_ylabel('y', fontsize=10)
+  ax.set_xscale('log')
+  ax.set_yscale('log')
   fig.patch.set_facecolor('white')
   fig.patch.set_alpha(BG_ALPHA)
   ax.patch.set_alpha(MG_ALPHA)
@@ -270,7 +281,7 @@ def plot(train_data, mean, std,
 
 
 def compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools, inception_model,
-                          compute_lpips=True):
+                          compute_lpips=True, save=True):
   samples = np.clip(q_samples * 255., 0, 255).astype(np.uint8)
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -351,7 +362,7 @@ def compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools
         stable_lpips_mean, stable_lpips_std, stable_psnr_mean, stable_psnr_std, stable_ssim_mean, stable_ssim_std, stable_mse_mean, stable_mse_std,
         ))
 
-    np.savez_compressed(
+    if save: np.savez_compressed(
       eval_path + "_stats.npz",
       pool_3=tmp_pool_3, logits=tmp_logits,
       lpips=_lpips,
@@ -377,7 +388,7 @@ def compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools
         psnr_mean, psnr_std, ssim_mean, ssim_std, mse_mean, mse_std,
         stable_psnr_mean, stable_psnr_std, stable_ssim_mean, stable_ssim_std, stable_mse_mean, stable_mse_std,
         ))
-    np.savez_compressed(
+    if save: np.savez_compressed(
       eval_path + "_stats.npz",
       pool_3=tmp_pool_3, logits=tmp_logits,
       lpips=_lpips,
@@ -391,7 +402,7 @@ def compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools
       stable_ssim=stable_ssim_mean, stable_ssim_std=stable_ssim_std,
       stable_mse=stable_mse_mean, stable_mse_std=stable_mse_std
       )
-  return (psnr_mean, psnr_std), (lpips_mean, lpips_std)
+  return (psnr_mean, psnr_std), (lpips_mean, lpips_std), (mse_mean, mse_std), (ssim_mean, ssim_std)
 
 
 def compute_metrics(config, cs_methods, eval_folder):
@@ -402,8 +413,10 @@ def compute_metrics(config, cs_methods, eval_folder):
   data_pools = data_stats["pool_3"]
   for cs_method in cs_methods:
     config.sampling.cs_method = cs_method
-    eval_file = "{}_{}_eval_{}".format(
-      config.sampling.noise_std, config.data.dataset, config.sampling.cs_method)
+    # eval_file = "{}_{}_eval_{}".format(
+    #   config.sampling.noise_std, config.data.dataset, config.sampling.cs_method)  # OLD
+    eval_file = "{}_{}_{}".format(
+      config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower())  # NEW
     # Compute inception scores, FIDs and KIDs.
     # Load all statistics that have been previously computed and saved
     all_logits = []
@@ -412,10 +425,11 @@ def compute_metrics(config, cs_methods, eval_folder):
     all_psnr = []
     all_ssim = []
     all_mse = []
-
     stats = tf.io.gfile.glob(os.path.join(eval_folder, eval_file + "_*_stats.npz"))
-
     flag = 1
+    print(os.path.join(eval_folder, eval_file + "_*_stats.npz"))
+    print(len(stats), "len stats")
+
     for stat_file in stats:
       with tf.io.gfile.GFile(stat_file, "rb") as fin:
         stat = np.load(fin)
@@ -446,6 +460,7 @@ def compute_metrics(config, cs_methods, eval_folder):
         all_logits = np.concatenate(all_logits, axis=0)
       else:
         all_logits = np.array(all_logits[0])
+
     if len(all_pools) != 1:
       all_pools = np.concatenate(all_pools, axis=0)
       if flag:
@@ -651,15 +666,10 @@ def deblur(config, workdir, eval_folder="eval"):
   method = 'nearest'
 
   num_sampling_rounds = 2
-  xs = []
-  ys = []
-  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-    noise_std=config.sampling.noise_std)
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    y, num_obs = get_convolve_observation(
+    x_flat, y, *_ = get_convolve_observation(
         rng, x, config)
     plot_samples(
       inverse_scaler(x.copy()),
@@ -674,11 +684,9 @@ def deblur(config, workdir, eval_folder="eval"):
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
 
-    xs.append(x)
-    ys.append(y)
-    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-      xs=jnp.array(xs), ys=jnp.array(ys))
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=jnp.array(x), y=y, noise_std=config.sampling.noise_std)
 
     def observation_map(x):
       print(x.shape)
@@ -695,7 +703,6 @@ def deblur(config, workdir, eval_folder="eval"):
       return x.flatten()
 
     H = None
-    y = y.flatten()
 
     cs_method = config.sampling.cs_method
 
@@ -756,50 +763,44 @@ def super_resolution(config, workdir, eval_folder="eval"):
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'TMPD2023avjp',
-                    'TMPD2023b',
-                    'Song2023',
-                    'Chung2022',  
+                    'KPDDPM',
+                    'DPSDDPM',
                     'PiGDMVP',
-                    'KPDDPM'
-                    'DPSDDPM']
+                    'TMPD2023b',
+                    'Chung2022scalar',  
+                    'Song2023',
+                    ]
     else:
       # VP/DDM methods with mask
       cs_methods = [
                     'KPDDPMplus',
-                    'PiGDMVPplus',
                     'DPSDDPMplus',
-                    'Song2023plus',
+                    'PiGDMVPplus',
                     'TMPD2023bvjpplus',
                     'chung2022scalarplus',  
-                    'chung2022plus',  
+                    'Song2023plus',
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'TMPD2023ajvp',
-                    'TMPD2023b',
-                    'Song2023',
-                    'Chung2022',  
+                    'KPSMLD',
+                    'DPSSMLD',
                     'PiGDMVE',
-                    'KPSMLD'
-                    'DPSSMLD']
+                    'TMPD2023b',
+                    'Chung2022scalar',
+                    'Song2023',
+                    ]
     else:
       # VE/SMLD methods with mask
       cs_methods = [
                     'KPSMLDplus',
-                    'PiGDMVEplus',
                     'DPSSMLDplus',
-                    'Song2023plus',
+                    'PiGDMVEplus',
                     'TMPD2023bvjpplus',
                     'chung2022scalarplus',  
-                    'chung2022plus',  
-                    'kgdmveplus',
-                    'tmpd2023avjp',
-                    'tmpd2023ajvp'
-                    'tmpd2023ajacrev',
+                    'Song2023plus',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -810,6 +811,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
   ckpt = config.eval.begin_ckpt
 
   # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -830,22 +832,18 @@ def super_resolution(config, workdir, eval_folder="eval"):
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
 
-  # obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
-  # method = 'nearest'
-  obs_shape = (config.data.image_size//16, config.data.image_size//16, config.data.num_channels)
-  method = 'bicubic'
-
+  shape=(config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels),
+  method='nearest'  # 'bicubic'
   num_sampling_rounds = 10
-  xs = []
-  ys = []
-  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-    noise_std=config.sampling.noise_std)
+
   for i in range(num_sampling_rounds):
-    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
-    x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    y, num_obs = get_superresolution_observation(
-        rng, x, config, obs_shape, method=method)
+    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    x_flat, y, *_ = get_superresolution_observation(
+      rng, x, config,
+      shape=shape,
+      method=method)
+
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -854,29 +852,26 @@ def super_resolution(config, workdir, eval_folder="eval"):
         config.data.dataset, config.solver.outer_solver, i))
     plot_samples(
       inverse_scaler(y.copy()),
-      image_size=obs_shape[1],
+      image_size=shape[1],
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
 
-    xs.append(x)
-    ys.append(y)
-    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-      xs=jnp.array(xs), ys=jnp.array(ys))
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=x, y=y, noise_std=config.sampling.noise_std)
 
     def observation_map(x):
       x = x.reshape(sampling_shape[1:])
-      y = jax.image.resize(x, obs_shape, method)
+      y = jax.image.resize(x, shape[1:], method)
       return y.flatten()
 
-    def adjoint_observation_map(x):
-      y = y.reshape(obs_shape)
+    def adjoint_observation_map(y):
+      y = y.reshape(shape[1:])
       x = jax.image.resize(y, sampling_shape[1:], method)
       return x.flatten()
 
     H = None
-    y = y.flatten()
 
     cs_method = config.sampling.cs_method
 
@@ -899,7 +894,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
 
       q_samples, _ = sampler(sample_rng)
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      print(q_samples, "\nconfig.sampling.cs_method")
       plot_samples(
         q_samples,
         image_size=config.data.image_size,
@@ -1015,16 +1009,11 @@ def inpainting(config, workdir, eval_folder="eval"):
   rng = jax.random.fold_in(rng, jax.host_id())
 
   num_sampling_rounds = 10
-  xs = []
-  ys = []
-  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-    noise_std=config.sampling.noise_std)
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-    x, mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -1032,16 +1021,14 @@ def inpainting(config, workdir, eval_folder="eval"):
       fname=eval_folder + "/_{}_ground_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
     plot_samples(
-      inverse_scaler(mask_y.copy()),
+      inverse_scaler(y.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
-    xs.append(x)
-    ys.append(mask_y)
-    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-      xs=jnp.array(xs), ys=jnp.array(ys))
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=x, y=y, noise_std=config.sampling.noise_std)
 
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
@@ -1051,14 +1038,13 @@ def inpainting(config, workdir, eval_folder="eval"):
       H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
-      y = H @ mask_y
+      y = H @ y
 
       def observation_map(x):
           x = x.flatten()
           return H @ x
       adjoint_observation_map = None
     else:
-      y = mask_y
       def observation_map(x):
           x = x.flatten()
           return mask * x
@@ -1176,7 +1162,7 @@ def sample(config,
     fname="{} samples".format(config.data.dataset))
 
 
-def evaluate(config,
+def evaluate_inpainting(config,
              workdir,
              eval_folder="eval"):
   """Evaluate trained models.
@@ -1219,53 +1205,44 @@ def evaluate(config,
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'TMPD2023b',
-                    'TMPD2023bjacfwd',
-                    'TMPD2023bvjp',
-                    'Song2023',
-                    'Chung2022',  
+                    'KPDDPM',
+                    'DPSDDPM',
                     'PiGDMVP',
-                    'KPDDPM'
-                    'DPSDDPM']
+                    'TMPD2023b',
+                    'Chung2022scalar',  
+                    'Song2023',
+                    ]
     else:
       # VP/DDM methods with mask
       cs_methods = [
                     'KPDDPMplus',
-                    'PiGDMVPplus',
                     'DPSDDPMplus',
+                    'PiGDMVPplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
                     'Song2023plus',
-                    'TMPD2023bvjp',
-                    'chung2022plus',  
                     ]
   elif config.training.sde.lower() == 'vesde':
     sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    # 'KPSMLD',
-                    # 'TMPD2023avjp',
-                    # 'TMPD2023ajacrev',
-                    'TMPD2023ajacfwd',
-                    # 'TMPD2023b',
-                    # 'Song2023',
-                    # 'Chung2022',  
-                    # 'PiGDMVE',
-                    # 'KGDMVE',
-                    # 'KPSMLD'
-                    # 'DPSSMLD'
+                    'KPSMLD',
+                    'DPSSMLD'
+                    'PiGDMVE',
+                    'TMPD2023b',
+                    'chung2022scalar',  
+                    'Song2023',
                     ]
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'DPSSMLDplus',
                     'KPSMLDplus',
-                    # 'KGDMVEplus',
+                    'DPSSMLDplus',
                     'PiGDMVEplus',
-                    'Song2023plus',
                     'TMPD2023bvjpplus',
-                    # 'TMPD2023ajacrevplus',
-                    # 'chung2022plus',
                     'chung2022scalarplus',  
+                    'Song2023plus',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -1296,12 +1273,7 @@ def evaluate(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 1
-  xs = []
-  ys = []
-  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-    noise_std=config.sampling.noise_std)
+  num_sampling_rounds = 0
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1314,24 +1286,22 @@ def evaluate(config,
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
 
-    x_flat, mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_ground_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
+      fname=eval_folder + "/_{}_{}_ground_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
     plot_samples(
-      inverse_scaler(mask_y.copy()),
+      inverse_scaler(y.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_observed_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
-    xs.append(x)
-    ys.append(mask_y)
-    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-      xs=jnp.array(xs), ys=jnp.array(ys))
+      fname=eval_folder + "/_{}_{}_observed_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=x, y=y, noise_std=config.sampling.noise_std)
 
     if 'plus' not in config.sampling.cs_method:
       logging.warning(
@@ -1341,14 +1311,14 @@ def evaluate(config,
       H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
-      y = H @ mask_y
+      y = H @ y
 
       def observation_map(x):
           x = x.flatten()
           return H @ x
       adjoint_observation_map = None
     else:
-      y = mask_y
+      y = y
       def observation_map(x):
           x = x.flatten()
           return mask * x
@@ -1376,21 +1346,215 @@ def evaluate(config,
       q_samples, _ = sampler(sample_rng)
       sample_time = time.time() - time_prev
       print("{}: {}s".format(cs_method, sample_time))
-
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      # print(q_samples, "\n{}".format(config.sampling.cs_method))
+      eval_file = "{}_{}_{}_{}".format(
+        config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), i)
+      eval_path = eval_folder + eval_file
+      np.savez(eval_path + ".npz", x=q_samples, y=y, noise_std=config.sampling.noise_std)
       plot_samples(
         q_samples,
         image_size=config.data.image_size,
         num_channels=config.data.num_channels,
-        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
-
-      eval_file = "{}_{}_eval_{}_{}".format(
-        config.sampling.noise_std, config.data.dataset, config.sampling.cs_method, i)
-      eval_path = eval_folder + eval_file
-      np.savez(eval_path + ".npz", xs=q_samples, y=mask_y)
+        fname=eval_path)
       compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools, inception_model,
-                            compute_lpips=True)
+                            compute_lpips=True, save=True)
+
+  compute_metrics(config, cs_methods, eval_folder)
+
+
+def evaluate_super_resolution(config,
+             workdir,
+             eval_folder="eval"):
+  """Evaluate trained models.
+
+  Args:
+    config: Configuration to use.
+    workdir: Working directory for checkpoints.
+    eval_folder: The subfolder for storing evaluation results. Default to
+      "eval".
+  """
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
+
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VP/DDPM Methods with matrix H
+      cs_methods = [
+                    'KPDDPM',
+                    'DPSDDPM',
+                    'PiGDMVP',
+                    'TMPD2023b',
+                    'Chung2022scalar',  
+                    'Song2023',
+                    ]
+    else:
+      # VP/DDM methods with mask
+      cs_methods = [
+                    'KPDDPMplus',
+                    'DPSDDPMplus',
+                    'PiGDMVPplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'Song2023plus',
+                    ]
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VE/SMLD Methods with matrix H
+      cs_methods = [
+                    'KPSMLD',
+                    'DPSSMLD',
+                    'PiGDMVE',
+                    'TMPD2023b',
+                    'Chung2022scalar',
+                    'Song2023',
+                    ]
+    else:
+      # VE/SMLD methods with mask
+      cs_methods = [
+                    'KPSMLDplus',
+                    'DPSSMLDplus',
+                    'PiGDMVEplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'Song2023plus',
+                    ]
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Get model state from checkpoint file
+  ckpt = config.eval.begin_ckpt
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+  epsilon_fn = mutils.get_epsilon_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+
+  batch_size = config.eval.batch_size
+  print("\nbatch_size={}".format(batch_size))
+  sampling_shape = (
+    config.eval.batch_size//num_devices,
+    config.data.image_size, config.data.image_size, config.data.num_channels)
+  print("sampling shape", sampling_shape)
+
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+
+  # Use inceptionV3 for images with resolution higher than 256.
+  inceptionv3 = config.data.image_size >= 256
+  inception_model = get_inception_model(inceptionv3=inceptionv3)
+  # Load pre-computed dataset statistics.
+  data_stats = load_dataset_stats(config)
+  data_pools = data_stats["pool_3"]
+
+  shape=(config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
+  method='nearest'  # 'bicubic'
+  num_sampling_rounds = 2
+
+  for i in range(num_sampling_rounds):
+    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    # x = get_asset_sample(config)
+
+    x_flat, y, *_ = get_superresolution_observation(
+      rng, x, config,
+      shape=shape,
+      method=method)
+
+    plot_samples(
+      inverse_scaler(x_flat.copy()),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_{}_ground_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
+    plot_samples(
+      inverse_scaler(y.copy()),
+      image_size=shape[1],
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_{}_observed_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=x, y=y, noise_std=config.sampling.noise_std)
+
+    def observation_map(x):
+      x = x.reshape(sampling_shape[1:])
+      y = jax.image.resize(x, shape[1:], method)
+      return y.flatten()
+
+    def adjoint_observation_map(y):
+      y = y.reshape(shape[1:])
+      x = jax.image.resize(y, sampling_shape[1:], method)
+      return x.flatten()
+
+    H = None
+
+    for cs_method in cs_methods:
+      config.sampling.cs_method = cs_method
+      if cs_method in ddim_methods:
+        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+      else:
+        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+
+      rng, sample_rng = jax.random.split(rng, 2)
+      if config.eval.pmap:
+        sampler = jax.pmap(sampler, axis_name='batch')
+        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        sample_rng = jnp.asarray(sample_rng)
+      else:
+        rng, sample_rng = jax.random.split(rng, 2)
+
+      time_prev = time.time()
+      q_samples, _ = sampler(sample_rng)
+      sample_time = time.time() - time_prev
+      print("{}: {}s".format(cs_method, sample_time))
+      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+      eval_file = "{}_{}_{}_{}".format(
+        config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), i)
+      eval_path = eval_folder + eval_file
+      np.savez(eval_path + ".npz", x=q_samples, y=y, noise_std=config.sampling.noise_std)
+      plot_samples(
+        q_samples,
+        image_size=config.data.image_size,
+        num_channels=config.data.num_channels,
+        fname=eval_path)
+      compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools, inception_model,
+                            compute_lpips=True, save=True)
 
   compute_metrics(config, cs_methods, eval_folder)
 
@@ -1403,60 +1567,253 @@ def evaluate_from_file(config,
     if 'plus' not in config.sampling.cs_method:
       # VP/DDPM Methods with matrix H
       cs_methods = [
-                    'TMPD2023b',
-                    'TMPD2023bjacfwd',
-                    'TMPD2023bvjp',
-                    'Song2023',
-                    'Chung2022',  
+                    'KPDDPM',
+                    'DPSDDPM',
                     'PiGDMVP',
-                    'KPDDPM'
-                    'DPSDDPM']
+                    'TMPD2023b',
+                    'Chung2022scalar',  
+                    'Song2023',
+                    ]
     else:
       # VP/DDM methods with mask
       cs_methods = [
                     'KPDDPMplus',
-                    'PiGDMVPplus',
                     'DPSDDPMplus',
+                    'PiGDMVPplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
                     'Song2023plus',
-                    'TMPD2023bvjp',
-                    'chung2022plus',  
                     ]
   elif config.training.sde.lower() == 'vesde':
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    # 'KPSMLD',
-                    # 'TMPD2023avjp',
-                    # 'TMPD2023ajacrev',
-                    'TMPD2023ajacfwd',
-                    # 'TMPD2023b',
-                    # 'Song2023',
-                    # 'Chung2022',  
-                    # 'PiGDMVE',
-                    # 'KGDMVE',
-                    # 'KPSMLD'
-                    # 'DPSSMLD'
+                    'KPSMLD',
+                    'DPSSMLD',
+                    'PiGDMVE',
+                    'TMPD2023b',
+                    'Chung2022scalar',
+                    'Song2023',
                     ]
     else:
       # VE/SMLD methods with mask
       cs_methods = [
-                    'DPSSMLDplus',
                     'KPSMLDplus',
-                    'KGDMVEplus',
+                    'DPSSMLDplus',
                     'PiGDMVEplus',
-                    'Song2023plus',
                     'TMPD2023bvjpplus',
-                    # 'TMPD2023ajacrevplus',
-                    # 'chung2022plus',  
                     'chung2022scalarplus',  
+                    'Song2023plus',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
   compute_metrics(config, cs_methods, eval_folder)
 
 
+def dps_search_inpainting(
+    config,
+    workdir,
+    eval_folder="eval"):
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
 
-def dps_hyperparameter_search(config,
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VP/DDPM Methods with matrix H
+      # cs_method = 'chung2022scalar'
+      cs_method = 'DPSDDPM'
+    else:
+      # VP/DDM methods with mask
+      # cs_method = 'chung2022scalarplus'
+      cs_method = 'DPSDDPMplus'
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VE/SMLD Methods with matrix H
+      # cs_method = 'chung2022scalar'
+      cs_method = 'DPSSMLD'
+    else:
+      # cs_method = 'chung2022scalarplus'
+      cs_method = 'DPSSMLDplus'
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Get model state from checkpoint file
+  ckpt = config.eval.begin_ckpt
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+
+  epsilon_fn = mutils.get_epsilon_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+
+  batch_size = config.eval.batch_size
+  print("\nbatch_size={}".format(batch_size))
+  sampling_shape = (
+    config.eval.batch_size//num_devices,
+    config.data.image_size, config.data.image_size, config.data.num_channels)
+  print("sampling shape", sampling_shape)
+
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+
+  num_sampling_rounds = 9
+
+  # Use inceptionV3 for images with resolution higher than 256.
+  inceptionv3 = config.data.image_size >= 256
+  inception_model = get_inception_model(inceptionv3=inceptionv3)
+  # Load pre-computed dataset statistics.
+  data_stats = load_dataset_stats(config)
+  data_pools = data_stats["pool_3"]
+
+  dps_hyperparameters = jnp.logspace(-1.5, 0.4, num=num_sampling_rounds, base=10.0)
+  psnr_means = []
+  psnr_stds = []
+  lpips_means = []
+  lpips_stds = []
+  ssim_means = []
+  ssim_stds = []
+  mse_means = []
+  mse_stds = []
+
+  for i, scale in enumerate(dps_hyperparameters):
+    # round to 3 sig fig
+    scale = float(f'{float(f"{scale:.3g}"):g}')
+    config.solver.dps_scale_hyperparameter = scale
+    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    # x = get_asset_sample(config)
+
+    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    plot_samples(
+      inverse_scaler(x_flat.copy()),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/search_{}_{}_ground_{}".format(
+        config.sampling.noise_std, config.data.dataset, scale))
+    plot_samples(
+      inverse_scaler(y.copy()),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/search_{}_{}_observed_{}".format(
+        config.sampling.noise_std, config.data.dataset, scale))
+    np.savez(eval_folder + "/search_{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, scale),
+      x=x, y=y, noise_std=config.sampling.noise_std)
+
+    if 'plus' not in config.sampling.cs_method and mask:
+      logging.warning(
+        "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
+          (num_obs, config.data.image_size**2 * config.data.num_channels)))
+      idx_obs = np.nonzero(mask)[0]
+      H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
+      ogrid = np.arange(num_obs, dtype=int)
+      H = H.at[ogrid, idx_obs].set(1.0)
+      y = H @ y
+
+      def observation_map(x):
+          x = x.flatten()
+          return H @ x
+      adjoint_observation_map = None
+    else:
+      def observation_map(x):
+          x = x.flatten()
+          return mask * x
+      adjoint_observation_map = None
+      H = None
+
+    config.sampling.cs_method = cs_method
+    if cs_method in ddim_methods:
+      sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+        y, H, observation_map, adjoint_observation_map, stack_samples=False)
+    else:
+      sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+        y, H, observation_map, adjoint_observation_map, stack_samples=False)
+
+    rng, sample_rng = jax.random.split(rng, 2)
+    if config.eval.pmap:
+      sampler = jax.pmap(sampler, axis_name='batch')
+      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      sample_rng = jnp.asarray(sample_rng)
+    else:
+      rng, sample_rng = jax.random.split(rng, 2)
+
+    time_prev = time.time()
+    q_samples, _ = sampler(sample_rng)
+    sample_time = time.time() - time_prev
+    print("{}: {}s".format(cs_method, sample_time))
+    q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+    plot_samples(
+      q_samples,
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/search_{}_{}_{}_{}".format(config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), scale))
+    # Save samples
+    eval_file = "search_{}_{}_{}_{}".format(
+      config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), scale)
+    eval_path = eval_folder + eval_file
+    np.savez(eval_path + ".npz", x=q_samples, y=y, noise_std=config.sampling.noise_std)
+    (psnr_mean, psnr_std), (lpips_mean, lpips_std), (mse_mean, mse_std), (ssim_mean, ssim_std) = compute_metrics_inner(
+      config, cs_method, eval_path, x, q_samples, data_pools, inception_model,
+      compute_lpips=True, save=False)
+    psnr_means.append(psnr_mean)
+    psnr_stds.append(psnr_std)
+    lpips_means.append(lpips_mean)
+    lpips_stds.append(lpips_std)
+    ssim_means.append(ssim_mean)
+    ssim_stds.append(ssim_std)
+    mse_means.append(mse_mean)
+    mse_stds.append(mse_std)
+
+  psnr_means = np.array(psnr_means)
+  psnr_stds = np.array(psnr_stds)
+  lpips_means = np.array(lpips_means)
+  lpips_stds = np.array(lpips_stds)
+  ssim_means = np.array(ssim_means)
+  ssim_stds = np.array(ssim_stds)
+  mse_means = np.array(mse_means)
+  mse_stds = np.array(mse_stds)
+
+  # plot hyperparameter search
+  plot((dps_hyperparameters, psnr_means), psnr_means, psnr_stds, xlabel='dps_scale', ylabel='psnr', fname=eval_folder + "dps_psnr.png")
+  plot((dps_hyperparameters, lpips_means), lpips_means, lpips_stds, xlabel='dps_scale', ylabel='lpips', fname=eval_folder + "dps_lpips.png")
+  plot((dps_hyperparameters, mse_means), mse_means, mse_stds, xlabel='dps_scale', ylabel='mse', fname=eval_folder + "dps_mse.png")
+  plot((dps_hyperparameters, ssim_means), ssim_means, ssim_stds, xlabel='dps_scale', ylabel='ssim', fname=eval_folder + "dps_ssim.png")
+
+
+def dps_search_super_resolution(config,
              workdir,
              eval_folder="eval"):
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
@@ -1534,12 +1891,7 @@ def dps_hyperparameter_search(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 2
-  xs = []
-  ys = []
-  np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-    config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-    noise_std=config.sampling.noise_std)
+  num_sampling_rounds = 9
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1548,59 +1900,57 @@ def dps_hyperparameter_search(config,
   data_stats = load_dataset_stats(config)
   data_pools = data_stats["pool_3"]
 
-  dps_hyperparameters = jnp.logspace(-2, 0.5, num=num_sampling_rounds, base=10.0)
+  dps_hyperparameters = jnp.logspace(-1.5, 0.4, num=num_sampling_rounds, base=10.0)
   psnr_means = []
   psnr_stds = []
   lpips_means = []
   lpips_stds = []
-  print(dps_hyperparameters)
+  ssim_means = []
+  ssim_stds = []
+  mse_means = []
+  mse_stds = []
 
+  shape = (config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
+  method = 'nearest'
   for i, scale in enumerate(dps_hyperparameters):
-    config.dps_scale_hyperparameter = scale
+    # round to 3 sig fig
+    scale = float(f'{float(f"{scale:.3g}"):g}')
+    config.solver.dps_scale_hyperparameter = scale
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
 
-    x_flat, mask_y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x_flat, y, mask, num_obs = get_superresolution_observation(
+      rng, x, config,
+      shape=shape,
+      method=method)
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_ground_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
+      fname=eval_folder + "/search_{}_{}_ground_{}".format(
+        config.sampling.noise_std, config.data.dataset, scale))
     plot_samples(
-      inverse_scaler(mask_y.copy()),
-      image_size=config.data.image_size,
+      inverse_scaler(y.copy()),
+      image_size=shape[1],
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_observed_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
-    xs.append(x)
-    ys.append(mask_y)
-    np.savez(eval_folder + "/{}_{}_eval_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, config.solver.outer_solver),
-      xs=jnp.array(xs), ys=jnp.array(ys))
+      fname=eval_folder + "/search_{}_{}_observed_{}".format(
+        config.sampling.noise_std, config.data.dataset, scale))
+    np.savez(eval_folder + "/search_{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, scale),
+      x=x, y=y, noise_std=config.sampling.noise_std)
 
-    if 'plus' not in config.sampling.cs_method:
-      logging.warning(
-        "Using full H matrix H.shape={} which may be too large to fit in memory ".format(
-          (num_obs, config.data.image_size**2 * config.data.num_channels)))
-      idx_obs = np.nonzero(mask)[0]
-      H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
-      ogrid = np.arange(num_obs, dtype=int)
-      H = H.at[ogrid, idx_obs].set(1.0)
-      y = H @ mask_y
+    def observation_map(x):
+      x = x.reshape(sampling_shape[1:])
+      y = jax.image.resize(x, shape[1:], method)
+      return y.flatten()
 
-      def observation_map(x):
-          x = x.flatten()
-          return H @ x
-      adjoint_observation_map = None
-    else:
-      y = mask_y
-      def observation_map(x):
-          x = x.flatten()
-          return mask * x
-      adjoint_observation_map = None
-      H = None
+    def adjoint_observation_map(y):
+      y = y.reshape(shape[1:])
+      x = jax.image.resize(y, sampling_shape[1:], method)
+      return x.flatten()
+
+    H = None
 
     config.sampling.cs_method = cs_method
     if cs_method in ddim_methods:
@@ -1622,31 +1972,40 @@ def dps_hyperparameter_search(config,
     q_samples, _ = sampler(sample_rng)
     sample_time = time.time() - time_prev
     print("{}: {}s".format(cs_method, sample_time))
-
     q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-    # print(q_samples, "\n{}".format(config.sampling.cs_method))
     plot_samples(
       q_samples,
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
-      fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
-
+      fname=eval_folder + "/search_{}_{}_{}_{}".format(config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), scale))
     # Save samples
-    eval_file = "{}_{}_eval_{}_{}".format(
-      config.sampling.noise_std, config.data.dataset, config.sampling.cs_method, i)
+    eval_file = "search_{}_{}_{}_{}".format(
+      config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), scale)
     eval_path = eval_folder + eval_file
-    np.savez(eval_path + ".npz", xs=q_samples, y=mask_y)
-    (psnr_mean, psnr_std), (lpips_mean, lpips_std) = compute_metrics_inner(config, cs_method, eval_path, x, q_samples, data_pools, inception_model)
+    np.savez(eval_path + ".npz", x=q_samples, y=y, noise_std=config.sampling.noise_std)
+    (psnr_mean, psnr_std), (lpips_mean, lpips_std), (mse_mean, mse_std), (ssim_mean, ssim_std) = compute_metrics_inner(
+      config, cs_method, eval_path, x, q_samples, data_pools, inception_model,
+      compute_lpips=True, save=False)
     psnr_means.append(psnr_mean)
     psnr_stds.append(psnr_std)
     lpips_means.append(lpips_mean)
     lpips_stds.append(lpips_std)
+    ssim_means.append(ssim_mean)
+    ssim_stds.append(ssim_std)
+    mse_means.append(mse_mean)
+    mse_stds.append(mse_std)
 
   psnr_means = np.array(psnr_means)
   psnr_stds = np.array(psnr_stds)
   lpips_means = np.array(lpips_means)
   lpips_stds = np.array(lpips_stds)
+  ssim_means = np.array(ssim_means)
+  ssim_stds = np.array(ssim_stds)
+  mse_means = np.array(mse_means)
+  mse_stds = np.array(mse_stds)
 
-  # plot
-  plot((dps_hyperparameters, psnr_means), psnr_means, psnr_stds, fname="dps_psnr.png")
-  plot((dps_hyperparameters, lpips_means), lpips_means, lpips_stds, fname="dps_lpips.png")
+  # plot hyperparameter search
+  plot((dps_hyperparameters, psnr_means), psnr_means, psnr_stds, xlabel='dps_scale', ylabel='psnr', fname=eval_folder + "dps_psnr.png")
+  plot((dps_hyperparameters, lpips_means), lpips_means, lpips_stds, xlabel='dps_scale', ylabel='lpips', fname=eval_folder + "dps_lpips.png")
+  plot((dps_hyperparameters, mse_means), mse_means, mse_stds, xlabel='dps_scale', ylabel='mse', fname=eval_folder + "dps_mse.png")
+  plot((dps_hyperparameters, ssim_means), ssim_means, ssim_stds, xlabel='dps_scale', ylabel='ssim', fname=eval_folder + "dps_ssim.png")

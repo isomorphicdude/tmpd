@@ -64,22 +64,30 @@ def get_config():
   sampling.cs_method = 'tmpd2023bvjpplus'
   # sampling.cs_method = 'tmpd2023avjp'
 
-  sampling.noise_std = 0.01
+  sampling.noise_std = 0.1
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 384
-  evaluate.pmap = True
+  evaluate.batch_size = 500
+  evaluate.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
   # solver.outer_solver = 'DDIMVE'
   # solver.outer_solver = 'SMLD'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter
-# https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
-  solver.dps_scale_hyperparameter = 0.1
+  # https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
+
+  # solver.dps_scale_hyperparameter = 0.8  # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 0.8  # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 0.3  # for noise_std=0.1
+
+  # superresolution 2nearest
+  # solver.dps_scale_hyperparameter = 0.8 # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 0.5 # for noise_std=0.05
+  solver.dps_scale_hyperparameter = 0.2  # for noise_std=0.1
 
   return config
