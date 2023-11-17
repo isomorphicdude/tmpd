@@ -617,7 +617,6 @@ def deblur(config, workdir, eval_folder="eval"):
                        ema_rate=config.model.ema_rate,
                        params_ema=initial_params,
                        rng=rng)  # pytype: disable=wrong-keyword-args
-
   checkpoint_dir = workdir
   cs_methods, sde = get_sde(config)
 
@@ -634,19 +633,16 @@ def deblur(config, workdir, eval_folder="eval"):
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
     config.eval.batch_size//num_devices,
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
-
   obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
   method = 'nearest'
 
@@ -654,7 +650,7 @@ def deblur(config, workdir, eval_folder="eval"):
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    x_flat, y, *_ = get_convolve_observation(
+    _, y, *_ = get_convolve_observation(
         rng, x, config)
     plot_samples(
       inverse_scaler(x.copy()),
@@ -668,7 +664,6 @@ def deblur(config, workdir, eval_folder="eval"):
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
-
     np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
       config.sampling.noise_std, config.data.dataset, i),
       x=jnp.array(x), y=y, noise_std=config.sampling.noise_std)
@@ -688,7 +683,6 @@ def deblur(config, workdir, eval_folder="eval"):
       return x.flatten()
 
     H = None
-
     cs_method = config.sampling.cs_method
 
     for cs_method in cs_methods:
@@ -708,7 +702,7 @@ def deblur(config, workdir, eval_folder="eval"):
       else:
         rng, sample_rng = jax.random.split(rng, 2)
 
-      q_samples, nfe = sampler(sample_rng)
+      q_samples, _ = sampler(sample_rng)
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
       print(q_samples, "\nconfig.sampling.cs_method")
       plot_samples(
@@ -723,11 +717,9 @@ def super_resolution(config, workdir, eval_folder="eval"):
   # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
   # ... they must be all the same model of device for pmap to work
   num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
-
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
-
   rng = jax.random.PRNGKey(config.seed + 1)
 
   # Initialize model
@@ -741,52 +733,45 @@ def super_resolution(config, workdir, eval_folder="eval"):
                        rng=rng)  # pytype: disable=wrong-keyword-args
 
   checkpoint_dir = workdir
-
-
+  cs_methods, sde = get_sde(config)
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
   ckpt = config.eval.begin_ckpt
-
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
+  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
-
   # Get model state from checkpoint file
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
     config.eval.batch_size//num_devices,
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
-
   shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
   method='nearest'  # 'bicubic'
-  num_sampling_rounds = 8
+  num_sampling_rounds = 1
 
   x = get_asset_sample(config)
-  x_flat, y, *_ = get_superresolution_observation(
+  _, y, *_ = get_superresolution_observation(
     rng, x, config,
     shape=shape,
     method=method)
   for i in range(num_sampling_rounds):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    # x_flat, y, *_ = get_superresolution_observation(
+    # _, y, *_ = get_superresolution_observation(
     #   rng, x, config,
     #   shape=shape,
     #   method=method)
-
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -815,7 +800,6 @@ def super_resolution(config, workdir, eval_folder="eval"):
       return x.flatten()
 
     H = None
-
     cs_method = config.sampling.cs_method
 
     for cs_method in cs_methods:
@@ -867,13 +851,11 @@ def inpainting(config, workdir, eval_folder="eval"):
                        ema_rate=config.model.ema_rate,
                        params_ema=initial_params,
                        rng=rng)  # pytype: disable=wrong-keyword-args
-
   checkpoint_dir = workdir
-
   cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
+  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -881,13 +863,12 @@ def inpainting(config, workdir, eval_folder="eval"):
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -897,10 +878,10 @@ def inpainting(config, workdir, eval_folder="eval"):
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
   x = get_asset_sample(config)
-  x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
-  num_sampling_rounds = 2
+  _, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+  num_sampling_rounds = 1
+
   for i in range(num_sampling_rounds):
     # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
@@ -963,7 +944,6 @@ def inpainting(config, workdir, eval_folder="eval"):
       q_samples, _ = sampler(sample_rng)
       sample_time = time.time() - time_prev
       print("{}: {}s".format(cs_method, sample_time))
-
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
       plot_samples(
         q_samples,
@@ -1082,13 +1062,12 @@ def evaluate_inpainting(config,
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -1098,7 +1077,6 @@ def evaluate_inpainting(config,
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
   num_sampling_rounds = 2
 
   # Use inceptionV3 for images with resolution higher than 256.
@@ -1111,7 +1089,6 @@ def evaluate_inpainting(config,
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-
     x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
     plot_samples(
       inverse_scaler(x_flat.copy()),
@@ -1235,12 +1212,10 @@ def evaluate_super_resolution(config,
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -1261,19 +1236,15 @@ def evaluate_super_resolution(config,
   shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
   method='bicubic'  # 'bicubic'
   num_sampling_rounds = 2
-  print(sampling_shape)
-  print(shape)
 
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-
     x_flat, y, *_ = get_superresolution_observation(
       rng, x, config,
       shape=shape,
       method=method)
-
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
@@ -1444,7 +1415,7 @@ def dps_search_inpainting(
   mse_means = []
   mse_stds = []
 
-  for i, scale in enumerate(dps_hyperparameters):
+  for scale in dps_hyperparameters:
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale
@@ -1648,7 +1619,7 @@ def dps_search_super_resolution(config,
 
   shape = (config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
   method = 'bicubic'
-  for i, scale in enumerate(dps_hyperparameters):
+  for scale in dps_hyperparameters:
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale
