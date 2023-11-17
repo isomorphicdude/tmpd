@@ -561,13 +561,13 @@ class KPSMLDplus(KPSMLD):
     h_x_0, vjp_h_x_0, (_, x_0) = vjp(
         lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
     diag = self.batch_observation_map(vjp_h_x_0(self.batch_observation_map(jnp.ones_like(x)))[0])
-    C_yy = diag + self.noise_std**2 / ratio[0] + 1e-4
+    C_yy = diag + self.noise_std**2 / ratio[0] + 1e-3
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0 + ls
 
   def analysis(self, y, x, t, timestep, ratio):
     h_x_0, vjp_h_x_0, (_, x_0) = vjp(
         lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
-    C_yy = self.observation_map(vjp_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio + 1e-4
+    C_yy = self.observation_map(vjp_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio + 1e-3
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0.squeeze(axis=0) + ls

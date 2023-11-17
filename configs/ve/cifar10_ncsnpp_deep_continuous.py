@@ -81,13 +81,24 @@ def get_config():
   solver.eta = 1.0  # DDIM hyperparameter
   # https://arxiv.org/pdf/2209.14687.pdf#page=20&zoom=100,144,757
 
+  # inpainting half
   # solver.dps_scale_hyperparameter = 0.8  # for noise_std=0.01
   # solver.dps_scale_hyperparameter = 0.8  # for noise_std=0.05
   # solver.dps_scale_hyperparameter = 0.3  # for noise_std=0.1
 
+  # inpainting square
+  # solver.dps_scale_hyperparameter = 0.5  # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 0.3  # for noise_std=0.05
+  solver.dps_scale_hyperparameter = 0.05 # for noise_std=0.1
+
   # superresolution 2nearest
   # solver.dps_scale_hyperparameter = 0.8 # for noise_std=0.01
   # solver.dps_scale_hyperparameter = 0.5 # for noise_std=0.05
-  solver.dps_scale_hyperparameter = 0.2  # for noise_std=0.1
+  # solver.dps_scale_hyperparameter = 0.2  # for noise_std=0.1
+
+  # superresolution 4bicubic
+  # solver.dps_scale_hyperparameter = 0.3 # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 0.15 # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 0.15  # for noise_std=0.1
 
   return config
