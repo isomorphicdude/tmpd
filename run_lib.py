@@ -118,14 +118,17 @@ class FFHQDataset(VisionDataset):
 
 
 def get_asset_sample(config):
-  transform = transforms.Compose([transforms.ToTensor(),
-                                  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+  # transform = transforms.Compose([transforms.ToTensor(),
+  #                                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+  transform = transforms.ToTensor()
   dataset = get_dataset(config.data.dataset.lower(),
                         root='./assets/',
                         transforms=transform)
-  loader = get_dataloader(dataset, batch_size=1, num_workers=0, train=False)
-  ref_img = next(enumerate(loader))
-  ref_img = ref_img.detach().cpu().numpy()[0].transpose(1, 2, 0)
+  loader = get_dataloader(dataset, batch_size=3, num_workers=0, train=False)
+  ref_img = next(iter(loader))
+  print(ref_img.shape)
+  ref_img = ref_img.detach().cpu().numpy()[2].transpose(1, 2, 0)
+  print(np.max(ref_img), np.min(ref_img))
   ref_img = np.tile(ref_img, (config.eval.batch_size, 1, 1, 1))
   return ref_img
 
@@ -150,20 +153,8 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
     rng, sample_rng = jax.random.split(rng, 2)
 
   q_samples, _ = sampler(sample_rng)
-  q_images = inverse_scaler(q_samples.copy())
+  # q_images = inverse_scaler(q_samples.copy())
   q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-
-  plot_samples(
-    inverse_scaler(q_images),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_prior_{}".format(config.data.dataset, config.solver.outer_solver))
-
-  plot_samples(
-    inverse_scaler(q_images[0]),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_groundtruth_{}".format(config.data.dataset, config.solver.outer_solver))
 
   return q_samples
 
@@ -180,14 +171,59 @@ def get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices):
   # TODO: can tree_map be used to pmap across data?
   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
 
-  plot_samples(
-    inverse_scaler(eval_batch['image'][0]),
-    image_size=config.data.image_size,
-    num_channels=config.data.num_channels,
-    fname=eval_folder + "/_{}_data_{}".format(config.data.dataset, config.solver.outer_solver))
-
   # return eval_batch['image'].reshape(config.eval.batch_size, config.data.image_size, config.data.image_size, config.data.num_channels)
   return eval_batch['image'][0]
+
+
+def get_sde(config):
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VP/DDPM Methods with matrix H
+      cs_methods = [
+                    'KPDDPM',
+                    'DPSDDPM',
+                    'PiGDMVP',
+                    'TMPD2023b',
+                    'Chung2022scalar',  
+                    'Song2023',
+                    ]
+    else:
+      # VP/DDM methods with mask
+      cs_methods = [
+                    'KPDDPMplus',
+                    'DPSDDPMplus',
+                    'PiGDMVPplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'Song2023plus',
+                    ]
+  elif config.training.sde.lower() == 'vesde':
+    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
+    if 'plus' not in config.sampling.cs_method:
+      # VE/SMLD Methods with matrix H
+      cs_methods = [
+                    'KPSMLD',
+                    'DPSSMLD',
+                    'PiGDMVE',
+                    'TMPD2023b',
+                    'Chung2022scalar',
+                    'Song2023',
+                    ]
+    else:
+      # VE/SMLD methods with mask
+      cs_methods = [
+                    'KPSMLDplus',
+                    'DPSSMLDplus',
+                    'PiGDMVEplus',
+                    'TMPD2023bvjpplus',
+                    'chung2022scalarplus',  
+                    'Song2023plus',
+                    ]
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  return cs_methods, sde
 
 
 def get_inpainting_observation(rng, x, config, mask_name='square'):
@@ -247,7 +283,8 @@ def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
     img = image_grid(x, image_size, num_channels)
     plt.figure(figsize=(8,8))
     plt.axis('off')
-    plt.imshow(img)
+    # NOTE: imshow resamples images so that the display image may not be the same resolution as the input
+    plt.imshow(img, interpolation=None)
     plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
     plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
     plt.close()
@@ -580,64 +617,11 @@ def deblur(config, workdir, eval_folder="eval"):
                        ema_rate=config.model.ema_rate,
                        params_ema=initial_params,
                        rng=rng)  # pytype: disable=wrong-keyword-args
-
   checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'TMPD2023avjp',
-                    'TMPD2023b',
-                    'Song2023',
-                    'Chung2022',  
-                    'PiGDMVP',
-                    'KPDDPM',
-                    'DPSDDPM'
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'PiGDMVPplus',
-                    'DPSDDPMplus',
-                    'Song2023plus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'chung2022plus',  
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    'TMPD2023ajvp',
-                    'TMPD2023b',
-                    'Song2023',
-                    'Chung2022',  
-                    'PiGDMVE',
-                    'KPSMLD',
-                    'DPSSMLD'
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    'KPSMLDplus',
-                    'PiGDMVEplus',
-                    'DPSSMLDplus',
-                    'Song2023plus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'chung2022plus',  
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  cs_methods, sde = get_sde(config)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
   ckpt = config.eval.begin_ckpt
 
   # Create data normalizer and its inverse
@@ -649,19 +633,16 @@ def deblur(config, workdir, eval_folder="eval"):
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
     config.eval.batch_size//num_devices,
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
-
   obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
   method = 'nearest'
 
@@ -669,7 +650,7 @@ def deblur(config, workdir, eval_folder="eval"):
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    x_flat, y, *_ = get_convolve_observation(
+    _, y, *_ = get_convolve_observation(
         rng, x, config)
     plot_samples(
       inverse_scaler(x.copy()),
@@ -683,7 +664,6 @@ def deblur(config, workdir, eval_folder="eval"):
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
         config.data.dataset, config.solver.outer_solver, i))
-
     np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
       config.sampling.noise_std, config.data.dataset, i),
       x=jnp.array(x), y=y, noise_std=config.sampling.noise_std)
@@ -703,176 +683,6 @@ def deblur(config, workdir, eval_folder="eval"):
       return x.flatten()
 
     H = None
-
-    cs_method = config.sampling.cs_method
-
-    for cs_method in cs_methods:
-      config.sampling.cs_method = cs_method
-      if cs_method in ddim_methods:
-        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-          y, H, observation_map, adjoint_observation_map, stack_samples=False)
-      else:
-        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-          y, H, observation_map, adjoint_observation_map, stack_samples=False)
-
-      rng, sample_rng = jax.random.split(rng, 2)
-      if config.eval.pmap:
-        # sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
-        sample_rng = jnp.asarray(sample_rng)
-      else:
-        rng, sample_rng = jax.random.split(rng, 2)
-
-      q_samples, nfe = sampler(sample_rng)
-      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      print(q_samples, "\nconfig.sampling.cs_method")
-      plot_samples(
-        q_samples,
-        image_size=config.data.image_size,
-        num_channels=config.data.num_channels,
-        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
-
-
-def super_resolution(config, workdir, eval_folder="eval"):
-  jax.default_device = jax.devices()[0]
-  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
-  # ... they must be all the same model of device for pmap to work
-  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
-
-  # Create directory to eval_folder
-  eval_dir = os.path.join(workdir, eval_folder)
-  tf.io.gfile.makedirs(eval_dir)
-
-  rng = jax.random.PRNGKey(config.seed + 1)
-
-  # Initialize model
-  rng, model_rng = jax.random.split(rng)
-  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
-  optimizer = losses.get_optimizer(config).create(initial_params)
-  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
-                       model_state=init_model_state,
-                       ema_rate=config.model.ema_rate,
-                       params_ema=initial_params,
-                       rng=rng)  # pytype: disable=wrong-keyword-args
-
-  checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'KPDDPM',
-                    'DPSDDPM',
-                    'PiGDMVP',
-                    'TMPD2023b',
-                    'Chung2022scalar',  
-                    'Song2023',
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'DPSDDPMplus',
-                    'PiGDMVPplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    'KPSMLD',
-                    'DPSSMLD',
-                    'PiGDMVE',
-                    'TMPD2023b',
-                    'Chung2022scalar',
-                    'Song2023',
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    'KPSMLDplus',
-                    'DPSSMLDplus',
-                    'PiGDMVEplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
-
-  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
-
-  ckpt = config.eval.begin_ckpt
-
-  # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
-  inverse_scaler = datasets.get_data_inverse_scaler(config)
-
-  # Get model state from checkpoint file
-  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
-  if not tf.io.gfile.exists(ckpt_filename):
-    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-
-  epsilon_fn = mutils.get_epsilon_fn(
-    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-  score_fn = mutils.get_score_fn(
-    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
-  batch_size = config.eval.batch_size
-  print("\nbatch_size={}".format(batch_size))
-  sampling_shape = (
-    config.eval.batch_size//num_devices,
-    config.data.image_size, config.data.image_size, config.data.num_channels)
-  print("sampling shape", sampling_shape)
-
-  shape=(config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels),
-  method='nearest'  # 'bicubic'
-  num_sampling_rounds = 10
-
-  for i in range(num_sampling_rounds):
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
-    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    x_flat, y, *_ = get_superresolution_observation(
-      rng, x, config,
-      shape=shape,
-      method=method)
-
-    plot_samples(
-      inverse_scaler(x.copy()),
-      image_size=config.data.image_size,
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_ground_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
-    plot_samples(
-      inverse_scaler(y.copy()),
-      image_size=shape[1],
-      num_channels=config.data.num_channels,
-      fname=eval_folder + "/_{}_observed_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
-
-    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
-      config.sampling.noise_std, config.data.dataset, i),
-      x=x, y=y, noise_std=config.sampling.noise_std)
-
-    def observation_map(x):
-      x = x.reshape(sampling_shape[1:])
-      y = jax.image.resize(x, shape[1:], method)
-      return y.flatten()
-
-    def adjoint_observation_map(y):
-      y = y.reshape(shape[1:])
-      x = jax.image.resize(y, sampling_shape[1:], method)
-      return x.flatten()
-
-    H = None
-
     cs_method = config.sampling.cs_method
 
     for cs_method in cs_methods:
@@ -893,6 +703,126 @@ def super_resolution(config, workdir, eval_folder="eval"):
         rng, sample_rng = jax.random.split(rng, 2)
 
       q_samples, _ = sampler(sample_rng)
+      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+      print(q_samples, "\nconfig.sampling.cs_method")
+      plot_samples(
+        q_samples,
+        image_size=config.data.image_size,
+        num_channels=config.data.num_channels,
+        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
+
+
+def super_resolution(config, workdir, eval_folder="eval"):
+  jax.default_device = jax.devices()[0]
+  # Tip: use CUDA_VISIBLE_DEVICES to restrict the devices visible to jax
+  # ... they must be all the same model of device for pmap to work
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+  rng = jax.random.PRNGKey(config.seed + 1)
+
+  # Initialize model
+  rng, model_rng = jax.random.split(rng)
+  score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
+  optimizer = losses.get_optimizer(config).create(initial_params)
+  state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
+                       model_state=init_model_state,
+                       ema_rate=config.model.ema_rate,
+                       params_ema=initial_params,
+                       rng=rng)  # pytype: disable=wrong-keyword-args
+
+  checkpoint_dir = workdir
+  cs_methods, sde = get_sde(config)
+  # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
+  rng = jax.random.fold_in(rng, jax.host_id())
+  ckpt = config.eval.begin_ckpt
+  # Create data normalizer and its inverse
+  # scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+  # Get model state from checkpoint file
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
+  if not tf.io.gfile.exists(ckpt_filename):
+    raise FileNotFoundError("{} does not exist".format(ckpt_filename))
+
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
+  epsilon_fn = mutils.get_epsilon_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  score_fn = mutils.get_score_fn(
+    sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
+  batch_size = config.eval.batch_size
+  print("\nbatch_size={}".format(batch_size))
+  sampling_shape = (
+    config.eval.batch_size//num_devices,
+    config.data.image_size, config.data.image_size, config.data.num_channels)
+  print("sampling shape", sampling_shape)
+  shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
+  method='nearest'  # 'bicubic'
+  num_sampling_rounds = 1
+
+  x = get_asset_sample(config)
+  _, y, *_ = get_superresolution_observation(
+    rng, x, config,
+    shape=shape,
+    method=method)
+  for i in range(num_sampling_rounds):
+    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
+    # _, y, *_ = get_superresolution_observation(
+    #   rng, x, config,
+    #   shape=shape,
+    #   method=method)
+    plot_samples(
+      inverse_scaler(x.copy()),
+      image_size=config.data.image_size,
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_ground_{}_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
+    plot_samples(
+      inverse_scaler(y.copy()),
+      image_size=shape[1],
+      num_channels=config.data.num_channels,
+      fname=eval_folder + "/_{}_observed_{}_{}".format(
+        config.sampling.noise_std, config.data.dataset, i))
+
+    np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
+      config.sampling.noise_std, config.data.dataset, i),
+      x=x, y=y, noise_std=config.sampling.noise_std)
+
+    def observation_map(x):
+      x = x.reshape(sampling_shape[1:])
+      y = jax.image.resize(x, shape[1:], method)
+      return y.flatten()
+
+    def adjoint_observation_map(y):
+      y = y.reshape(shape[1:])
+      x = jax.image.resize(y, sampling_shape[1:], method)
+      return x.flatten()
+
+    H = None
+    cs_method = config.sampling.cs_method
+
+    for cs_method in cs_methods:
+      config.sampling.cs_method = cs_method
+      if cs_method in ddim_methods:
+        sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
+          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+      else:
+        sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
+          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+
+      rng, sample_rng = jax.random.split(rng, 2)
+      if config.eval.pmap:
+        # sampler = jax.pmap(sampler, axis_name='batch')
+        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        sample_rng = jnp.asarray(sample_rng)
+      else:
+        rng, sample_rng = jax.random.split(rng, 2)
+
+      time_prev = time.time()
+      q_samples, _ = sampler(sample_rng)
+      sample_time = time.time() - time_prev
+      print("{}: {}s".format(cs_method, sample_time))
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
       plot_samples(
         q_samples,
@@ -921,69 +851,11 @@ def inpainting(config, workdir, eval_folder="eval"):
                        ema_rate=config.model.ema_rate,
                        params_ema=initial_params,
                        rng=rng)  # pytype: disable=wrong-keyword-args
-
   checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'TMPD2023b',
-                    'TMPD2023bjacfwd',
-                    'TMPD2023bvjp',
-                    'Song2023',
-                    'Chung2022',  
-                    'PiGDMVP',
-                    'KPDDPM',
-                    'DPSDDPM'
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'PiGDMVPplus',
-                    'DPSDDPMplus',
-                    'Song2023plus',
-                    'TMPD2023bvjp',
-                    'chung2022plus',  
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    # 'KPSMLD',
-                    # 'TMPD2023avjp',
-                    # 'TMPD2023ajacrev',
-                    'TMPD2023ajacfwd',
-                    # 'TMPD2023b',
-                    # 'Song2023',
-                    # 'Chung2022',  
-                    # 'PiGDMVE',
-                    # 'KGDMVE',
-                    # 'KPSMLD',
-                    # 'DPSSMLD',
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    # 'KGDMVEplus',
-                    'KPSMLDplus',
-                    # 'PiGDMVEplus',
-                    # 'DPSSMLDplus',
-                    # 'Song2023plus',
-                    # 'TMPD2023bvjpplus',
-                    # 'TMPD2023ajacrevplus',
-                    # 'chung2022plus',  
-                    # 'chung2022scalarplus',  
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
+  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -991,13 +863,12 @@ def inpainting(config, workdir, eval_folder="eval"):
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -1007,25 +878,26 @@ def inpainting(config, workdir, eval_folder="eval"):
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
+  x = get_asset_sample(config)
+  _, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+  num_sampling_rounds = 1
 
-  num_sampling_rounds = 10
   for i in range(num_sampling_rounds):
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    # x = get_asset_sample(config)
-    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    # x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_ground_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
+        config.sampling.noise_std, config.data.dataset, i))
     plot_samples(
       inverse_scaler(y.copy()),
       image_size=config.data.image_size,
       num_channels=config.data.num_channels,
       fname=eval_folder + "/_{}_observed_{}_{}".format(
-        config.data.dataset, config.solver.outer_solver, i))
+        config.sampling.noise_std, config.data.dataset, i))
     np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
       config.sampling.noise_std, config.data.dataset, i),
       x=x, y=y, noise_std=config.sampling.noise_std)
@@ -1072,14 +944,12 @@ def inpainting(config, workdir, eval_folder="eval"):
       q_samples, _ = sampler(sample_rng)
       sample_time = time.time() - time_prev
       print("{}: {}s".format(cs_method, sample_time))
-
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      # print(q_samples, "\n{}".format(config.sampling.cs_method))
       plot_samples(
         q_samples,
         image_size=config.data.image_size,
         num_channels=config.data.num_channels,
-        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
+        fname=eval_folder + "/{}_{}_{}_{}".format(config.sampling.noise_std, config.data.dataset, config.sampling.cs_method.lower(), i))
 
 
 def sample(config,
@@ -1114,23 +984,10 @@ def sample(config,
                        rng=rng)  # pytype: disable=wrong-keyword-args
 
   checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    sampling_eps = 1e-3
-  elif config.training.sde.lower() == 'subvpsde':
-    # sampling_eps = 1e-3
-    raise NotImplementedError("The sub-variance-preserving SDE was not implemented.")
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    sampling_eps = 1e-5
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  _, sde = get_sde(config)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
   ckpt = config.eval.begin_ckpt
 
   # Wait if the target checkpoint doesn't exist yet
@@ -1145,16 +1002,12 @@ def sample(config,
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
 
-  # rsde = sde.reverse(score_fn)
-  # drift, diffusion = rsde.sde(x_0, t_0)
-
   sampler = get_sampler(
     (4, config.data.image_size, config.data.image_size, config.data.num_channels),
     EulerMaruyama(sde.reverse(score_fn), num_steps=config.model.num_scales))
   q_samples, num_function_evaluations = sampler(rng)
   print("num_function_evaluations", num_function_evaluations)
   q_samples = inverse_scaler(q_samples)
-  print(q_samples.shape)
   plot_samples(
     q_samples,
     image_size=config.data.image_size,
@@ -1198,54 +1051,7 @@ def evaluate_inpainting(config,
                        rng=rng)  # pytype: disable=wrong-keyword-args
 
   checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'KPDDPM',
-                    'DPSDDPM',
-                    'PiGDMVP',
-                    'TMPD2023b',
-                    'Chung2022scalar',  
-                    'Song2023',
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'DPSDDPMplus',
-                    'PiGDMVPplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    'KPSMLD',
-                    'DPSSMLD'
-                    'PiGDMVE',
-                    'TMPD2023b',
-                    'chung2022scalar',  
-                    'Song2023',
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    'KPSMLDplus',
-                    'DPSSMLDplus',
-                    'PiGDMVEplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
@@ -1256,13 +1062,12 @@ def evaluate_inpainting(config,
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
-  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
 
+  state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -1272,8 +1077,7 @@ def evaluate_inpainting(config,
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-
-  num_sampling_rounds = 0
+  num_sampling_rounds = 2
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1285,8 +1089,7 @@ def evaluate_inpainting(config,
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-
-    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
@@ -1396,56 +1199,8 @@ def evaluate_super_resolution(config,
                        ema_rate=config.model.ema_rate,
                        params_ema=initial_params,
                        rng=rng)  # pytype: disable=wrong-keyword-args
-
   checkpoint_dir = workdir
-
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    sde = VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'KPDDPM',
-                    'DPSDDPM',
-                    'PiGDMVP',
-                    'TMPD2023b',
-                    'Chung2022scalar',  
-                    'Song2023',
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'DPSDDPMplus',
-                    'PiGDMVPplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    sde = VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    'KPSMLD',
-                    'DPSSMLD',
-                    'PiGDMVE',
-                    'TMPD2023b',
-                    'Chung2022scalar',
-                    'Song2023',
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    'KPSMLDplus',
-                    'DPSSMLDplus',
-                    'PiGDMVEplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
@@ -1457,12 +1212,10 @@ def evaluate_super_resolution(config,
   if not tf.io.gfile.exists(ckpt_filename):
     raise FileNotFoundError("{} does not exist".format(ckpt_filename))
   state = checkpoints.restore_checkpoint(checkpoint_dir, state, step=ckpt)
-
   epsilon_fn = mutils.get_epsilon_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
   score_fn = mutils.get_score_fn(
     sde, score_model, state.params_ema, state.model_state, train=False, continuous=True)
-
   batch_size = config.eval.batch_size
   print("\nbatch_size={}".format(batch_size))
   sampling_shape = (
@@ -1480,20 +1233,18 @@ def evaluate_super_resolution(config,
   data_stats = load_dataset_stats(config)
   data_pools = data_stats["pool_3"]
 
-  shape=(config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
-  method='nearest'  # 'bicubic'
+  shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
+  method='bicubic'  # 'bicubic'
   num_sampling_rounds = 2
 
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
-
     x_flat, y, *_ = get_superresolution_observation(
       rng, x, config,
       shape=shape,
       method=method)
-
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
@@ -1562,51 +1313,7 @@ def evaluate_super_resolution(config,
 def evaluate_from_file(config,
                    workdir,
                    eval_folder="eval"):
-  # Setup SDEs
-  if config.training.sde.lower() == 'vpsde':
-    if 'plus' not in config.sampling.cs_method:
-      # VP/DDPM Methods with matrix H
-      cs_methods = [
-                    'KPDDPM',
-                    'DPSDDPM',
-                    'PiGDMVP',
-                    'TMPD2023b',
-                    'Chung2022scalar',  
-                    'Song2023',
-                    ]
-    else:
-      # VP/DDM methods with mask
-      cs_methods = [
-                    'KPDDPMplus',
-                    'DPSDDPMplus',
-                    'PiGDMVPplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  elif config.training.sde.lower() == 'vesde':
-    if 'plus' not in config.sampling.cs_method:
-      # VE/SMLD Methods with matrix H
-      cs_methods = [
-                    'KPSMLD',
-                    'DPSSMLD',
-                    'PiGDMVE',
-                    'TMPD2023b',
-                    'Chung2022scalar',
-                    'Song2023',
-                    ]
-    else:
-      # VE/SMLD methods with mask
-      cs_methods = [
-                    'KPSMLDplus',
-                    'DPSSMLDplus',
-                    'PiGDMVEplus',
-                    'TMPD2023bvjpplus',
-                    'chung2022scalarplus',  
-                    'Song2023plus',
-                    ]
-  else:
-    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+  cs_methods, _ = get_sde(config)
   compute_metrics(config, cs_methods, eval_folder)
 
 
@@ -1689,7 +1396,7 @@ def dps_search_inpainting(
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 9
+  num_sampling_rounds = 10
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1708,7 +1415,7 @@ def dps_search_inpainting(
   mse_means = []
   mse_stds = []
 
-  for i, scale in enumerate(dps_hyperparameters):
+  for scale in dps_hyperparameters:
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale
@@ -1716,7 +1423,7 @@ def dps_search_inpainting(
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
 
-    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
     plot_samples(
       inverse_scaler(x_flat.copy()),
       image_size=config.data.image_size,
@@ -1891,7 +1598,7 @@ def dps_search_super_resolution(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 9
+  num_sampling_rounds = 10
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1910,9 +1617,9 @@ def dps_search_super_resolution(config,
   mse_means = []
   mse_stds = []
 
-  shape = (config.eval.batch_size, config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
-  method = 'nearest'
-  for i, scale in enumerate(dps_hyperparameters):
+  shape = (config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
+  method = 'bicubic'
+  for scale in dps_hyperparameters:
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale

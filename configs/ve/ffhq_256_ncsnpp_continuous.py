@@ -70,18 +70,14 @@ def get_config():
   config.seed = 23  #223
   sampling.cs_method = 'TMPD2023bvjpplus'
 
-  sampling.noise_std = 0.0001953125
-  # sampling.noise_std = 0.0001953125
-  sampling.noise_std = 0.000390625
-  # sampling.noise_std = 0.0025
-  # sampling.noise_std = 0.005
+  sampling.noise_std = 0.1
   sampling.denoise = True  # work out what denoise_override is
   sampling.innovation = True  # this will probably be superceded
   sampling.inverse_scaler = None
   evaluate = config.eval
   evaluate.begin_ckpt = 48
   evaluate.end_ckpt = 48
-  evaluate.batch_size = 1
+  evaluate.batch_size = 1  # 64
   evaluate.pmap = False
   solver = config.solver
   solver.num_outer_steps = config.model.num_scales
@@ -90,4 +86,28 @@ def get_config():
   # solver.outer_solver = 'SMLD'
   solver.eta = 1.0  # DDIM hyperparameter
 
+  # inpainting half
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.1
+
+  # inpainting square
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.1
+
+  # superresolution 2nearest
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.1
+
+  # superresolution 4nearest
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.1
+
+  # superresolution 4bicubic
+  solver.dps_scale_hyperparameter = 0.5 # for noise_std=0.01
+  # solver.dps_scale_hyperparameter = 1.0 # for noise_std=0.05
+  # solver.dps_scale_hyperparameter = 1.0  # for noise_std=0.1
   return config
