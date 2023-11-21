@@ -64,10 +64,11 @@ setup(
         "setuptools_scm_git_archive",
         ],
         'examples': [
-        "optax",
-        "orbax-checkpoint",
         "torch",
         "mlkernels",
+        "numpyro",
+        "pandas",
+        "POT",
         ],
     },
     include_package_data=True)

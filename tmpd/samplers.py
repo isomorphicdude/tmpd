@@ -25,6 +25,7 @@ from diffusionjax.solvers import EulerMaruyama
 from tmpd.solvers import (
     DPSDDPM, DPSDDPMplus,
     KPDDPM, KPSMLD,
+    KPSMLDdiag, KPDDPMdiag,
     KPDDPMplus, KPSMLDplus,
     DPSSMLD, DPSSMLDplus,
     PiGDMVE, PiGDMVP, PiGDMVPplus, PiGDMVEplus,
@@ -180,6 +181,20 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
                             dt=config.solver.dt, epsilon=config.solver.epsilon,
                             sigma_min=config.model.sigma_min,
                             sigma_max=config.model.sigma_max)
+        sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
+    elif config.sampling.cs_method.lower()=='kpsmlddiag':
+        score = model
+        outer_solver = KPSMLDdiag(y, observation_map, config.sampling.noise_std, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+                            dt=config.solver.dt, epsilon=config.solver.epsilon,
+                            sigma_min=config.model.sigma_min,
+                            sigma_max=config.model.sigma_max)
+        sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
+    elif config.sampling.cs_method.lower()=='kpddpmdiag':
+        score = model
+        outer_solver = KPDDPMdiag(y, observation_map, config.sampling.noise_std, sampling_shape[1:], score, num_steps=config.solver.num_outer_steps,
+                            dt=config.solver.dt, epsilon=config.solver.epsilon,
+                            beta_min=config.model.beta_min,
+                            beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='kpddpmplus':
         score = model

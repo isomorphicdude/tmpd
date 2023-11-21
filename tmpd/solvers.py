@@ -1,6 +1,6 @@
 """Markov Chains."""
 import jax.numpy as jnp
-from jax import random, grad, vmap, vjp, jacrev
+from jax import random, grad, vmap, vjp, jacrev, value_and_grad
 from diffusionjax.utils import batch_mul, batch_matmul, batch_linalg_solve, batch_mul_A
 from diffusionjax.solvers import DDIMVP, DDIMVE, SMLD, DDPM
 
@@ -14,7 +14,7 @@ class KGDMVP(DDIMVP):
     self.batch_analysis_vmap = vmap(self.analysis)
     self.y = y
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.observation_map = observation_map
     self.batch_observation_map = vmap(observation_map)
     self.batch_batch_observation_map = vmap(vmap(observation_map))
@@ -90,7 +90,7 @@ class KGDMVE(DDIMVE):
                       self.num_steps))
     self.y = y
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
     self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(observation_map)
     self.batch_analysis_vmap = vmap(self.analysis)
@@ -160,7 +160,7 @@ class PiGDMVP(DDIMVP):
     self.y = y
     self.noise_std = noise_std
     self.data_variance = data_variance
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.observation_map = observation_map
     self.batch_observation_map = vmap(observation_map)
     self.jacrev_vmap = vmap(jacrev(lambda x, t, timestep: self.estimate_h_x_0_vmap(x, t, timestep)[0]))
@@ -236,7 +236,7 @@ class SSPiGDMVP(DDIMVP):
     self.batch_analysis_vmap = vmap(self.analysis)
     self.y = y
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
 
   def analysis(self, y, x, t, timestep, v, alpha):
     h_x_0, vjp_estimate_h_x_0, (epsilon, x_0) = vjp(
@@ -280,7 +280,7 @@ class PiGDMVE(DDIMVE):
     self.y = y
     self.data_variance = data_variance
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
     self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(observation_map)
     self.batch_analysis_vmap = vmap(self.analysis)
@@ -431,7 +431,7 @@ class KPDDPM(DDPM):
     super().__init__(score, num_steps, dt, epsilon, beta_min, beta_max)
     self.y = y
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
     self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(observation_map)
     self.batch_analysis_vmap = vmap(self.analysis)
@@ -507,7 +507,7 @@ class KPSMLD(SMLD):
     super().__init__(score, num_steps, dt, epsilon, sigma_min, sigma_max)
     self.y = y
     self.noise_std = noise_std
-    self.num_y = y.shape[0]
+    self.num_y = y.shape[1]
     self.estimate_h_x_0 = self.get_estimate_x_0(observation_map)
     self.estimate_h_x_0_vmap = self.get_estimate_x_0_vmap(observation_map)
     self.batch_analysis_vmap = vmap(self.analysis)
@@ -519,20 +519,20 @@ class KPSMLD(SMLD):
     self.axes = (0,) + tuple(range(len(shape) + 2)[2:]) + (1,)
     self.axes_vmap = tuple(range(len(shape) + 1)[1:]) + (0,)
 
-  def batch_analysis(self, y, x, t, timestep, v):
+  def batch_analysis(self, y, x, t, timestep, ratio):
     h_x_0, (_, x_0) = self.estimate_h_x_0(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
     grad_H_x_0 = self.jacrev_vmap(x, t, timestep)
     H_grad_H_x_0 = self.batch_batch_observation_map(grad_H_x_0)
-    C_yy = H_grad_H_x_0 + self.noise_std**2 / v[0] * jnp.eye(self.num_y)
+    C_yy = H_grad_H_x_0 + self.noise_std**2 / ratio[0] * jnp.eye(self.num_y)
     f = batch_linalg_solve(C_yy, y - h_x_0)
     ls = batch_matmul(grad_H_x_0.transpose(self.axes), f).reshape(x_0.shape)
     return x_0 + ls
 
-  def analysis(self, y, x, t, timestep, v):
+  def analysis(self, y, x, t, timestep, ratio):
     h_x_0, (_, x_0) = self.estimate_h_x_0_vmap(x, t, timestep)  # TODO: in python 3.8 this line can be removed by utilizing has_aux=True
     grad_H_x_0 = jacrev(lambda _x: self.estimate_h_x_0_vmap(_x, t, timestep)[0])(x)
     H_grad_H_x_0 = self.batch_observation_map(grad_H_x_0)
-    C_yy = H_grad_H_x_0 + self.noise_std**2 / v * jnp.eye(self.num_y)
+    C_yy = H_grad_H_x_0 + self.noise_std**2 / ratio * jnp.eye(self.num_y)
     f = jnp.linalg.solve(C_yy, y - h_x_0)
     ls = grad_H_x_0.transpose(self.axes_vmap) @ f
     return x_0.squeeze(axis=0) + ls
@@ -557,17 +557,97 @@ class KPSMLD(SMLD):
 
 class KPSMLDplus(KPSMLD):
   """Kalman posterior for SMLD Ancestral sampling."""
+  def analysis(self, y, x, t, timestep, ratio):
+    h_x_0, vjp_h_x_0, (_, x_0) = vjp(
+        lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
+    C_yy = self.observation_map(vjp_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio
+    ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
+    return x_0.squeeze(axis=0) + ls
+
   def batch_analysis(self, y, x, t, timestep, ratio):
     h_x_0, vjp_h_x_0, (_, x_0) = vjp(
         lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
     diag = self.batch_observation_map(vjp_h_x_0(self.batch_observation_map(jnp.ones_like(x)))[0])
-    C_yy = diag + self.noise_std**2 / ratio[0] + 1e-3
+    C_yy = diag + self.noise_std**2 / ratio[0]
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0 + ls
+
+
+class KPSMLDdiag(KPSMLD):
+  """Kalman posterior for SMLD Ancestral sampling."""
+
+  def get_grad_estimate_x_0_vmap(self, observation_map):
+    """https://stackoverflow.com/questions/70956578/jacobian-diagonal-computation-in-jax"""
+
+    def estimate_x_0_single(val, i, x, t, timestep):
+      x_shape = x.shape
+      x = x.flatten()
+      x = x.at[i].set(val)
+      x = x.reshape(x_shape)
+      x = jnp.expand_dims(x, axis=0)
+      t = jnp.expand_dims(t, axis=0)
+      v = self.discrete_sigmas[timestep]**2
+      s = self.score(x, t)
+      x_0 = x + v * s
+      h_x_0 = observation_map(x_0)
+      return h_x_0[i]
+    return vmap(value_and_grad(estimate_x_0_single), in_axes=(0, 0, None, None, None))
 
   def analysis(self, y, x, t, timestep, ratio):
     h_x_0, vjp_h_x_0, (_, x_0) = vjp(
         lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
-    C_yy = self.observation_map(vjp_h_x_0(self.observation_map(jnp.ones_like(x)))[0]) + self.noise_std**2 / ratio + 1e-3
+
+    # There is no natural way to do this with JAX's transforms:
+    # you cannot map the input, because in general each diagonal entry of the jacobian depends on all inputs.
+    # This seems like the best method, but it is too slow for numerical evaluation, and batch size cannot be large (max size tested was one)
+    vec_vjp_h_x_0 = vmap(vjp_h_x_0)
+    diag = jnp.diag(self.batch_observation_map(vec_vjp_h_x_0(jnp.eye(y.shape[0]))[0]))
+
+    # # This method gives OOM error
+    # idx = jnp.arange(len(y))
+    # h_x_0, diag = self.grad_estimate_x_0_vmap(x.flatten(), idx, x, t, timestep)
+    # diag = self.observation_map(diag)
+
+    # # This method can't be XLA compiled and is way too slow for numerical evaluation
+    # diag = jnp.empty(y.shape[0])
+    # for i in range(y.shape[0]):
+    #   eye = jnp.zeros(y.shape[0])
+    #   diag_i = jnp.dot(self.observation_map(vjp_h_x_0(eye)[0]), eye)
+    #   diag = diag.at[i].set(diag_i)
+
+    C_yy = diag + self.noise_std**2 / ratio + 1e-3
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0.squeeze(axis=0) + ls
+
+  def batch_analysis(self, y, x, t, timestep, ratio):
+    h_x_0, vjp_h_x_0, (_, x_0) = vjp(
+        lambda x: self.estimate_h_x_0(x, t, timestep), x, has_aux=True)
+    vec_vjp_h_x_0 = vmap(vjp_h_x_0)
+    eye = jnp.tile(jnp.eye(y.shape[1]), (x.shape[0], 1, 1)).transpose(1, 0, 2)
+    diag = jnp.diagonal(self.batch_batch_observation_map(vec_vjp_h_x_0(eye)[0]), axis1=0, axis2=2)
+    C_yy = diag + self.noise_std**2 / ratio[0] + 1e-3
+    ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
+    return x_0 + ls
+
+
+class KPDDPMdiag(KPDDPM):
+  """Kalman posterior for DDPM Ancestral sampling."""
+
+  def analysis(self, y, x, t, timestep, ratio):
+    h_x_0, vjp_h_x_0, (_, x_0) = vjp(
+        lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
+    vec_vjp_h_x_0 = vmap(vjp_h_x_0)
+    diag = jnp.diag(self.batch_observation_map(vec_vjp_h_x_0(jnp.eye(y.shape[0]))[0]))
+    C_yy = diag + self.noise_std**2 / ratio
+    ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
+    return x_0.squeeze(axis=0) + ls
+
+  def batch_analysis(self, y, x, t, timestep, ratio):
+    h_x_0, vjp_h_x_0, (_, x_0) = vjp(
+        lambda x: self.estimate_h_x_0_vmap(x, t, timestep), x, has_aux=True)
+    vec_vjp_h_x_0 = vmap(vjp_h_x_0)
+    eye = jnp.tile(jnp.eye(y.shape[1]), (x.shape[0], 1, 1)).transpose(1, 0, 2)
+    diag = jnp.diagonal(self.batch_batch_observation_map(vec_vjp_h_x_0(eye)[0]), axis1=0, axis2=2)
+    C_yy = diag + self.noise_std**2 / ratio
+    ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
+    return x_0 + ls

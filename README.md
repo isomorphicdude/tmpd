@@ -47,7 +47,7 @@ Reproduce our experiment by typing
 ```sh
 python gmm.py:
   --config: Training configuration.
-    (default: './configs/example2.py')
+    (default: './configs/gmm.py')
   --workdir: Working directory
     (default: './workdir')
 ```
@@ -60,15 +60,15 @@ You will require the pre-trained model checkpoints to access the score models. A
 
 Please note that if for any reason you need to download the CelebAHQ and/or FFHQ datasets, you will need to manually download them using these [instructions](https://github.com/tkarras/progressive_growing_of_gans#preparing-datasets-for-training). 
 
-Reproduce our inpainting, super_resolution and deblur experiments through `main.py`.
+Reproduce our inpainting, super_resolution and deblur experiments through `main.py`. Please first 
+download the FID statistics for CIFAR-10 using these [instructions](https://github.com/yang-song/score_sde/tree/main#:~:text=Stats%20files%20for%20quantitative%20evaluation) and place them into the `assets/` folder in the working directory of this README file.
 ```sh
 python main.py:
   --config: Configuration.
-    (default: 'None')
-  --eval_folder: The folder name for storing evaluation results
+  --eval_folder: The folder name for storing evaluation results.
     (default: 'eval')
-  --mode: <inpainting|super_resolution|deblur>: Running mode: inpainting, super_resolution or deblur
-  --workdir: Working directory
+  --mode: <eval_inpainting|eval_super_resolution|eval_deblur>: Run evaluation on: inpainting, super_resolution or deblur.
+  --workdir: Working directory.
 ```
 
 * `config` is the path to the config file. They are adapted from [https://github.com/yang-song/score_sde/tree/main#:~:text=workdir%3A%20Working%20directory-,config,-is%20the%20path](here). Our prescribed config files are provided in `configs/`.
@@ -81,3 +81,12 @@ python main.py:
 
 The experimental setup can be configured through the config file and the experimental parameters within `run_lib.py`.
 
+We also provide scripts to simply sample from either inpainting, super_resolution and deblur experiments through `main.py`.
+```sh
+python main.py:
+  --config: Configuration.
+  --eval_folder: The folder name for storing evaluation results.
+    (default: 'eval')
+  --mode: <inpainting|super_resolution|deblur>: Run sampling on: inpainting, super_resolution or deblur.
+  --workdir: Working directory.
+```

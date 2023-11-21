@@ -170,8 +170,7 @@ def main(argv):
     size = 8.
     num_repeats = 20
 
-    # TODO: change back
-    for ind_dim, dim in enumerate([80, 8, 80, 800]):
+    for ind_dim, dim in enumerate([8, 80, 800]):
         config.data.image_size = dim
 
         # setup of the inverse problem
@@ -216,8 +215,7 @@ def main(argv):
         logging.info("diffusion prior:\nmean {},\nvar {}".format(np.mean(samples, axis=0), np.var(samples, axis=0)))
         plot_single_image(config.sampling.noise_std, dim, '_', 1000, i, 'prior', [0, 1], samples, color=color_algorithm)
 
-        # TODO: change back
-        for ind_ptg, dim_y in enumerate([4, 1, 2, 4]):
+        for ind_ptg, dim_y in enumerate([1, 2, 4]):
             for i in trange(0, num_repeats, unit="trials dim_y={}".format(dim_y)):
                 seed_num_inv_problem = (2**(ind_dim))*(3**(ind_ptg)*(5**(ind_increase))) + i
                 manual_seed(seed_num_inv_problem)
@@ -233,29 +231,21 @@ def main(argv):
                 plot_single_image(config.sampling.noise_std, dim, dim_y, 1000, i, 'posterior', [0, 1], posterior_samples, color=color_posterior)
 
                 y = jnp.array(init_obs.numpy(), dtype=jnp.float32)
+                y = jnp.tile(y, (config.eval.batch_size//num_devices, 1))
                 H = jnp.array(A.numpy(), dtype=jnp.float32)
                 mask = None
 
                 def observation_map(x):
+                    x = x.flatten()
                     return H @ x
 
                 def adjoint_observation_map(y):
+                    y = y.flatten()
                     return H.T @ y
 
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
-                cs_methods = ['Song2023', 'Chung2022', 'TMPD2023avjp', 'TMPD2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
-                cs_methods = ['chung2022plus', 'song2023plus', 'tmpd2023bvjpplus']
-
-                # cs_methods = ['song2023plus']
-                # cs_methods = ['tmpd2023ajacfwd']
-                # cs_methods = ['tmpd2023ajacrev']
-                # cs_methods = ['tmpd2023avjp']
-                # cs_methods = ['chung2022scalarplus']
-                # cs_methods = ['tmpd2023b']
-                # cs_methods = ['tmpd2023bvjpplus']
-                # cs_methods = ['tmpd2023bjacfwd']
-                # cs_methods = ['tmpd2023bvjp']
-                cs_methods = ['KGDMVP']
+                cs_methods = ['KPDDPM', 'KPDDPMdiag', 'DPSDDPM', 'PiGDMVP']
+                # cs_methods = ['TMPD2023avjp', 'TMPD2023bvjp', 'Chung2022scalar', 'Song2023']
 
                 for cs_method in cs_methods:
                     config.sampling.cs_method = cs_method
@@ -263,11 +253,11 @@ def main(argv):
                     sampler = get_cs_sampler(
                         config, sde, fn, (config.eval.batch_size//num_devices, config.data.image_size),
                         None,  # dataset.get_data_inverse_scaler(config),
-                        y, dim_y,
-                        H, observation_map, adjoint_observation_map, stack_samples=config.sampling.stack_samples)
+                        y, H, observation_map, adjoint_observation_map,
+                        stack_samples=config.sampling.stack_samples)
 
                     time_prev = time.time()
-                    samples, nfe = sampler(sample_rng)
+                    samples, _ = sampler(sample_rng)
                     sample_time = time.time() - time_prev
 
                     if config.sampling.stack_samples:
@@ -295,9 +285,9 @@ def main(argv):
                                             })
                         plot_image(config.sampling.noise_std, dim, dim_y, 1000, i, cs_method, [0, 1], samples, posterior_samples)
 
-                pd.DataFrame.from_records(dists_infos).to_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std), float_format='%.3f')
+                pd.DataFrame.from_records(dists_infos).to_csv(workdir + '/{}_{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.cs_method, config.sampling.noise_std), float_format='%.3f')
 
-            data = pd.read_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std))
+            data = pd.read_csv(workdir + '/{}_{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.cs_method, config.sampling.noise_std))
             agg_data = data.groupby(['dim', 'dim_y', 'num_steps', 'algorithm', 'distance_name']).distance.apply(lambda x: f'{np.nanmean(x):.1f} ± {1.96 * np.nanstd(x) / (x.shape[0]**.5):.1f}').reset_index()
 
             agg_data_sw = agg_data.loc[agg_data.distance_name == 'sw'].pivot(index=('dim', 'dim_y', 'num_steps'), columns='algorithm', values=['distance']).reset_index()
@@ -306,7 +296,7 @@ def main(argv):
             for col in agg_data_sw.columns:
                 if col not in ['dim', 'dim_y', 'num_steps']:
                     agg_data_sw[col + '_num'] = agg_data_sw[col].apply(lambda x: float(x.split(" ± ")[0]))
-            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '/{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.noise_std))
+            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '/{}_{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.cs_method, config.sampling.noise_std))
 
 
 if __name__ == "__main__":

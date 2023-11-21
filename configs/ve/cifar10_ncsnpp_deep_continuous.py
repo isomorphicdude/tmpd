@@ -64,14 +64,13 @@ def get_config():
   sampling.cs_method = 'tmpd2023bvjpplus'
   # sampling.cs_method = 'tmpd2023avjp'
 
-  sampling.noise_std = 0.1
-  sampling.denoise = True  # work out what denoise_override is
-  sampling.innovation = True  # this will probably be superceded
+  sampling.noise_std = 0.05
+  sampling.denoise = True
   sampling.inverse_scaler = None
   evaluate = config.eval
   evaluate.begin_ckpt = 12
   evaluate.end_ckpt = 12
-  evaluate.batch_size = 500
+  evaluate.batch_size = 1
   evaluate.pmap = False
   solver = config.solver
   solver.outer_solver = 'eulermaruyama'
@@ -87,9 +86,9 @@ def get_config():
   # solver.dps_scale_hyperparameter = 0.3  # for noise_std=0.1
 
   # inpainting square
-  # solver.dps_scale_hyperparameter = 0.5  # for noise_std=0.01
+  solver.dps_scale_hyperparameter = 0.5  # for noise_std=0.01
   # solver.dps_scale_hyperparameter = 0.3  # for noise_std=0.05
-  solver.dps_scale_hyperparameter = 0.05 # for noise_std=0.1
+  # solver.dps_scale_hyperparameter = 0.05 # for noise_std=0.1
 
   # superresolution 2nearest
   # solver.dps_scale_hyperparameter = 0.8 # for noise_std=0.01

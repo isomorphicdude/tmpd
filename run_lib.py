@@ -21,7 +21,7 @@ from absl import flags
 FLAGS = flags.FLAGS
 from diffusionjax.sde import VP, VE
 from diffusionjax.solvers import EulerMaruyama
-from diffusionjax.utils import get_sampler
+from diffusionjax.utils import get_sampler, batch_matmul_A
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from tmpd.samplers import get_cs_sampler
 from tmpd.inpainting import get_mask
@@ -159,19 +159,16 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
   return q_samples
 
 
-def get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices):
+def get_eval_sample(scaler, config, num_devices):
   # Build data pipeline
   _, eval_ds, _ = datasets.get_dataset(num_devices,
                                        config,
                                        uniform_dequantization=config.data.uniform_dequantization,
                                        evaluation=True)
-                        
   eval_iter = iter(eval_ds)
   batch = next(eval_iter)
-  # TODO: can tree_map be used to pmap across data?
+  # TODO: can tree_map be used to pmap across observation data?
   eval_batch = jax.tree_map(lambda x: scaler(x._numpy()), batch)  # pylint: disable=protected-access
-
-  # return eval_batch['image'].reshape(config.eval.batch_size, config.data.image_size, config.data.image_size, config.data.num_channels)
   return eval_batch['image'][0]
 
 
@@ -204,16 +201,20 @@ def get_sde(config):
     if 'plus' not in config.sampling.cs_method:
       # VE/SMLD Methods with matrix H
       cs_methods = [
-                    'KPSMLD',
-                    'DPSSMLD',
-                    'PiGDMVE',
-                    'TMPD2023b',
-                    'Chung2022scalar',
-                    'Song2023',
+                    # 'TMPD2023bvjp'
+                    'KPSMLDdiag',
+                    # 'KPSMLD',
+                    # 'DPSSMLD',
+                    # 'PiGDMVE',
+                    # 'TMPD2023b',
+                    # 'Chung2022scalar',
+                    # 'Song2023',
                     ]
     else:
       # VE/SMLD methods with mask
       cs_methods = [
+                    # 'KPSMLDdiag',
+                    # 'TMPD2023bvjpplus'
                     'KPSMLDplus',
                     'DPSSMLDplus',
                     'PiGDMVEplus',
@@ -309,6 +310,8 @@ def plot(train_data, mean, std, xlabel='x', ylabel='y',
   ax.set_ylabel('y', fontsize=10)
   ax.set_xscale('log')
   ax.set_yscale('log')
+  ax.set_xlabel(xlabel)
+  ax.set_ylabel(ylabel)
   fig.patch.set_facecolor('white')
   fig.patch.set_alpha(BG_ALPHA)
   ax.patch.set_alpha(MG_ALPHA)
@@ -756,9 +759,9 @@ def super_resolution(config, workdir, eval_folder="eval"):
     config.eval.batch_size//num_devices,
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
-  shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
-  method='nearest'  # 'bicubic'
-  num_sampling_rounds = 1
+  shape=(config.eval.batch_size, config.data.image_size//8, config.data.image_size//8, config.data.num_channels)
+  method='bicubic'  # 'bicubic'
+  num_sampling_rounds = 2
 
   x = get_asset_sample(config)
   _, y, *_ = get_superresolution_observation(
@@ -855,7 +858,7 @@ def inpainting(config, workdir, eval_folder="eval"):
   cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
-  # scaler = datasets.get_data_scaler(config)
+  scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -878,14 +881,14 @@ def inpainting(config, workdir, eval_folder="eval"):
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
-  x = get_asset_sample(config)
-  _, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
-  num_sampling_rounds = 1
+  num_sampling_rounds = 2
 
+  x = get_asset_sample(config)
+  _, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
   for i in range(num_sampling_rounds):
-    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    # x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    # x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
+    # _, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='half')
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -910,7 +913,7 @@ def inpainting(config, workdir, eval_folder="eval"):
       H = jnp.zeros((num_obs, config.data.image_size**2 * config.data.num_channels))
       ogrid = np.arange(num_obs, dtype=int)
       H = H.at[ogrid, idx_obs].set(1.0)
-      y = H @ y
+      y = batch_matmul_A(H, y)
 
       def observation_map(x):
           x = x.flatten()
@@ -1086,7 +1089,7 @@ def evaluate_inpainting(config,
   data_stats = load_dataset_stats(config)
   data_pools = data_stats["pool_3"]
   for i in range(num_sampling_rounds):
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
     x_flat, y, mask, num_obs = get_inpainting_observation(rng, x, config, mask_name='square')
@@ -1238,7 +1241,7 @@ def evaluate_super_resolution(config,
   num_sampling_rounds = 2
 
   for i in range(num_sampling_rounds):
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
     x_flat, y, *_ = get_superresolution_observation(
@@ -1396,7 +1399,7 @@ def dps_search_inpainting(
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 9
+  num_sampling_rounds = 10
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1419,7 +1422,7 @@ def dps_search_inpainting(
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
 
@@ -1598,7 +1601,7 @@ def dps_search_super_resolution(config,
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
   rng = jax.random.fold_in(rng, jax.host_id())
 
-  num_sampling_rounds = 9
+  num_sampling_rounds = 10
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1623,7 +1626,7 @@ def dps_search_super_resolution(config,
     # round to 3 sig fig
     scale = float(f'{float(f"{scale:.3g}"):g}')
     config.solver.dps_scale_hyperparameter = scale
-    x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
     # x = get_asset_sample(config)
 
