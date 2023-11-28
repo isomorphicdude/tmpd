@@ -246,31 +246,32 @@ def get_superresolution_observation(rng, x, config, shape, method='square'):
   return x, y, mask, num_obs
 
 
-def get_convolve_observation(rng, x, config):
-  width = 11
-  k = jnp.linspace(-3, 3, width)
-  print(x.shape)
-  x = jnp.transpose(x,[2,1,0])    # lhs = NCHW image tensor
-  print(x.shape)
-  x = jnp.expand_dims(x, 0)
-  print(x.shape)
-  window = jsp.stats.norm.pdf(k) * jsp.stats.norm.pdf(k[:, None])
-  kernel = jnp.zeros((width, width, 3, 3), dtype=jnp.float32)
-  kernel += window[:, :, jnp.newaxis, jnp.newaxis]
-  print(kernel.shape)
-  k = jnp.transpose(kernel, [3, 2, 0, 1])  # rhs = OIHW conv kernel tensor
-  print(k.shape)
-  y = lax.conv(x,  # lhs = NCHW image tensor
-               k,  # rhs = OIHW conv kernel tensor
-               (1, 1),  # window strides
-               'SAME')  # padding mode
-  print("out", y.shape)
-  y = jnp.transpose(y, [0, 2, 3, 1])
-  y = y[0]
-  print("out", y.shape)
-  # y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
+def get_blur_observation(rng, x, config):
+  from bkse.models.kernel_encoding.kernel_wizard import KernelWizard
+
+  def get_blur_model(opt_yml_path):
+    with open(opt_yml_path, "r") as f:
+      opt = yaml.safe_load(f)["KernelWizard"]
+      model_path = opt["pretrained"]
+    blur_model = KernelWizard(opt)
+    blur_model.eval()
+    blur_model.load_state_dict(torch.load(model_path))
+    blur_model = blur_model.to(self.device)
+    return blur_model
+
+  opt_yml_path = './bkse/options/generate_blur/default.yml'
+  blue_model = get_blur_model(opt_yml_path)
+
+  def observation_map(x):
+    random_kernel = random.randn(1, config.image_size, 2, 2) * 1.2
+    # x = (x + 1.) / 2.  # do I need?
+    blurred = blur_model(x, kernel=random_kernel)
+    return blurred
+
+  y = observation_map(x)
+  y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
-  return y, num_obs
+  return x, y, observation_map, num_obs
 
 
 def image_grid(x, image_size, num_channels):
@@ -653,8 +654,9 @@ def deblur(config, workdir, eval_folder="eval"):
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    _, y, *_ = get_convolve_observation(
+    _, y, observation_map, _ = get_blur_observation(
         rng, x, config)
+
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -670,20 +672,8 @@ def deblur(config, workdir, eval_folder="eval"):
     np.savez(eval_folder + "/{}_{}_ground_observed_{}.npz".format(
       config.sampling.noise_std, config.data.dataset, i),
       x=jnp.array(x), y=y, noise_std=config.sampling.noise_std)
-
-    def observation_map(x):
-      print(x.shape)
-      x = x.reshape(sampling_shape[1:])
-      print(x.shape)
-      y = jax.image.resize(x, obs_shape, method)
-      print(y.shape)
-      assert 0
-      return y.flatten()
-
-    def adjoint_observation_map(x):
-      y = y.reshape(obs_shape)
-      x = jax.image.resize(y, sampling_shape[1:], method)
-      return x.flatten()
+    print(observation_map)
+    assert 0
 
     H = None
     cs_method = config.sampling.cs_method
