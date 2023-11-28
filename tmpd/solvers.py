@@ -615,7 +615,7 @@ class KPSMLDdiag(KPSMLD):
     #   diag_i = jnp.dot(self.observation_map(vjp_h_x_0(eye)[0]), eye)
     #   diag = diag.at[i].set(diag_i)
 
-    C_yy = diag + self.noise_std**2 / ratio + 1e-3
+    C_yy = diag + self.noise_std**2 / ratio
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0.squeeze(axis=0) + ls
 
@@ -625,7 +625,7 @@ class KPSMLDdiag(KPSMLD):
     vec_vjp_h_x_0 = vmap(vjp_h_x_0)
     eye = jnp.tile(jnp.eye(y.shape[1]), (x.shape[0], 1, 1)).transpose(1, 0, 2)
     diag = jnp.diagonal(self.batch_batch_observation_map(vec_vjp_h_x_0(eye)[0]), axis1=0, axis2=2)
-    C_yy = diag + self.noise_std**2 / ratio[0] + 1e-3
+    C_yy = diag + self.noise_std**2 / ratio[0]
     ls = vjp_h_x_0((y - h_x_0) / C_yy)[0]
     return x_0 + ls
 
