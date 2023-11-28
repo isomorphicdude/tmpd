@@ -214,12 +214,13 @@ def get_sde(config):
       # VE/SMLD methods with mask
       cs_methods = [
                     # 'KPSMLDdiag',
-                    # 'TMPD2023bvjpplus'
+                    'TMPD2023bvjpplus',
                     'KPSMLDplus',
                     'DPSSMLDplus',
                     'PiGDMVEplus',
-                    'TMPD2023bvjpplus',
+                    'KGDMVEplus',
                     'chung2022scalarplus',  
+                    'chung2022plus',  
                     'Song2023plus',
                     ]
   else:
@@ -731,7 +732,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
   rng = jax.random.fold_in(rng, jax.host_id())
   ckpt = config.eval.begin_ckpt
   # Create data normalizer and its inverse
-  # scaler = datasets.get_data_scaler(config)
+  scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
   # Get model state from checkpoint file
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
@@ -751,20 +752,20 @@ def super_resolution(config, workdir, eval_folder="eval"):
   print("sampling shape", sampling_shape)
   shape=(config.eval.batch_size, config.data.image_size//8, config.data.image_size//8, config.data.num_channels)
   method='bicubic'  # 'bicubic'
-  num_sampling_rounds = 2
+  num_sampling_rounds = 3
 
-  x = get_asset_sample(config)
-  _, y, *_ = get_superresolution_observation(
-    rng, x, config,
-    shape=shape,
-    method=method)
+  # x = get_asset_sample(config)
+  # _, y, *_ = get_superresolution_observation(
+  #   rng, x, config,
+  #   shape=shape,
+  #   method=method)
   for i in range(num_sampling_rounds):
-    # x = get_eval_sample(scaler, inverse_scaler, config, eval_folder, num_devices)
+    x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    # _, y, *_ = get_superresolution_observation(
-    #   rng, x, config,
-    #   shape=shape,
-    #   method=method)
+    _, y, *_ = get_superresolution_observation(
+      rng, x, config,
+      shape=shape,
+      method=method)
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -1228,7 +1229,7 @@ def evaluate_super_resolution(config,
 
   shape=(config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
   method='bicubic'  # 'bicubic'
-  num_sampling_rounds = 2
+  num_sampling_rounds = 6
 
   for i in range(num_sampling_rounds):
     x = get_eval_sample(scaler, config, num_devices)
