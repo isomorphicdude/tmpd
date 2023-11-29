@@ -649,7 +649,6 @@ def deblur(config, workdir, eval_folder="eval"):
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
   obs_shape = (config.data.image_size//2, config.data.image_size//2, config.data.num_channels)
-  method = 'nearest'
 
   num_sampling_rounds = 2
   for i in range(num_sampling_rounds):
