@@ -57,7 +57,6 @@ def sliced_wasserstein(rng, dist_1, dist_2, n_slices=100):
 
 
 def Wasserstein2(m1, C1, m2, C2):
-    C2_half = scipy.linalg.sqrtm(C2)
     C1_half = scipy.linalg.sqrtm(C1)
     C_half = jnp.asarray(np.asarray(np.real(scipy.linalg.sqrtm(C1_half @ C2 @ C1_half)), dtype=float))
     return jnp.linalg.norm(m1 - m2)**2 + jnp.trace(C1) + jnp.trace(C2) - 2 * jnp.trace(C_half)

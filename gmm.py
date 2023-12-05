@@ -14,7 +14,7 @@ from torch import eye, randn_like, vstack, manual_seed
 from torch.distributions import MixtureSameFamily, MultivariateNormal, Categorical
 from diffusionjax.plot import plot_heatmap
 from diffusionjax.utils import get_sampler
-from diffusionjax.run_lib import get_markov_chain, get_ddim_chain
+from diffusionjax.run_lib import get_ddim_chain
 import diffusionjax.sde as sde_lib
 from tmpd.samplers import get_cs_sampler
 from tmpd.plot import plot_single_image, plot_image
@@ -205,7 +205,6 @@ def main(argv):
         outer_solver = get_ddim_chain(config, model)
         inner_solver = None
 
-        inverse_scaler = None
         sampling_shape = (config.eval.batch_size//num_devices, config.data.image_size)
         sampler = get_sampler(sampling_shape, outer_solver,
                             inner_solver, denoise=config.sampling.denoise,
@@ -233,7 +232,6 @@ def main(argv):
                 y = jnp.array(init_obs.numpy(), dtype=jnp.float32)
                 y = jnp.tile(y, (config.eval.batch_size//num_devices, 1))
                 H = jnp.array(A.numpy(), dtype=jnp.float32)
-                mask = None
 
                 def observation_map(x):
                     x = x.flatten()

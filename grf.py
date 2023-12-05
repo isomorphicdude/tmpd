@@ -15,7 +15,6 @@ import lab as B
 import numpy as np
 from probit.approximators import LaplaceGP as GP
 from probit.utilities import log_gaussian_likelihood
-import scipy
 import logging
 import time
 from tmpd.plot import (
@@ -86,7 +85,7 @@ def main(argv):
         plot_samples_1D(samples[:64, ..., 0], config.data.image_size, "samples_1D", alpha=FG_ALPHA)
 
     def nabla_log_pt(x, t):
-        """
+        r"""
         Args:
             x: One location in $\mathbb{R}^{image_size**2}$
             t: time
@@ -109,7 +108,7 @@ def main(argv):
             cov=C, shape=(config.eval.batch_size,))
         C_emp = jnp.cov(p_samples[:, :].T)
         m_emp = jnp.mean(p_samples[:, :].T, axis=1)
-        corr_emp = jnp.corrcoef(p_samples[:, :].T)
+        # corr_emp = jnp.corrcoef(p_samples[:, :].T)
         plot_heatmap(samples=p_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="target_prior_heatmap")
 
         p_samples = p_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
@@ -119,7 +118,7 @@ def main(argv):
         delta_t_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_t_var = jnp.linalg.norm(jnp.diag(C) - jnp.diag(C_emp)) / config.data.image_size
         delta_t_mean = jnp.linalg.norm(m_emp) / config.data.image_size
-        delta_t_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
+        # delta_t_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
         logging.info("analytic_prior delta_mean={}, delta_var={}, delta_cov={}".format(
             delta_t_mean, delta_t_var, delta_t_cov))
 
@@ -138,8 +137,8 @@ def main(argv):
 
         C_emp = jnp.cov(q_samples[:, :].T)
         m_emp = jnp.mean(q_samples[:, :].T, axis=1)
-        corr_emp = jnp.corrcoef(q_samples[:, :].T)
-        delta_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
+        # corr_emp = jnp.corrcoef(q_samples[:, :].T)
+        # delta_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
         delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
         plot_heatmap(samples=q_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="diffusion_prior_heatmap")

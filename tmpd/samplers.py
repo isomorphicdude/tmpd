@@ -1,5 +1,4 @@
 """Samplers."""
-from jax import jit, vmap
 from diffusionjax.utils import get_sampler
 from diffusionjax.inverse_problems import (
     get_dps,
@@ -12,15 +11,6 @@ from diffusionjax.inverse_problems import (
     get_diag_jacrev_guidance,
     get_diag_vjp_guidance,
     get_diag_jacfwd_guidance)
-# from tmpd.inverse_problems import (
-#     get_linear_inverse_guidance,
-#     get_jacrev_guidance,
-#     get_jacfwd_guidance,
-#     get_vjp_guidance,
-#     get_vjp_guidance_plus,
-#     get_diag_jacrev_guidance,
-#     get_diag_vjp_guidance,
-#     )
 from diffusionjax.solvers import EulerMaruyama
 from tmpd.solvers import (
     DPSDDPM, DPSDDPMplus,
@@ -71,7 +61,6 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
         sampler = get_sampler(sampling_shape,
                               EulerMaruyama(sde.reverse(model).guide(
                                   get_pseudo_inverse_guidance, observation_map, y, config.sampling.noise_std, H @ H.T)),
-                                  # get_linear_inverse_guidance, observation_map, y, config.sampling.noise_std, H @ H.T)),
                               inverse_scaler=inverse_scaler,
                               stack_samples=stack_samples,
                               denoise=True)
@@ -79,7 +68,6 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
         sampler = get_sampler(sampling_shape,
                               EulerMaruyama(sde.reverse(model).guide(
                                   get_pseudo_inverse_guidance, observation_map, y, config.sampling.noise_std)),
-                                  # get_linear_inverse_guidance, observation_map, y, config.sampling.noise_std, 1.)),
                               inverse_scaler=inverse_scaler,
                               stack_samples=stack_samples,
                               denoise=True)
@@ -129,7 +117,6 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
         sampler = get_sampler(sampling_shape,
                               EulerMaruyama(sde.reverse(model).guide(
                                   get_vjp_guidance_mask, observation_map, y, config.sampling.noise_std)),
-                                  # get_vjp_guidance_plus, observation_map, y, config.sampling.noise_std)),
                               inverse_scaler=inverse_scaler,
                               stack_samples=stack_samples,
                               denoise=True)

@@ -4,14 +4,13 @@ import os
 import time
 import jax
 import jax.numpy as jnp
-from jax import lax, vmap
-import jax.scipy as jsp
+from jax import vmap, random
 import numpy as np
 import tensorflow as tf
 import tensorflow_gan as tfgan
 import logging
 from flax.training import checkpoints
-# TODO: Keep the import below for registering all model definitions
+# NOTE: Keep the import below for registering all model definitions
 from models import ddpm, ncsnv2, ncsnpp
 import losses
 from evaluation import get_inception_model, load_dataset_stats, run_inception_distributed
@@ -25,7 +24,6 @@ from diffusionjax.utils import get_sampler, batch_matmul_A
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from tmpd.samplers import get_cs_sampler
 from tmpd.inpainting import get_mask
-from tmpd.plot import plot
 import matplotlib.pyplot as plt
 from tensorflow.image import ssim as tf_ssim
 from tensorflow.image import psnr as tf_psnr
@@ -37,7 +35,8 @@ from torchvision.datasets import VisionDataset
 import torchvision.transforms as transforms
 import torch
 import lpips
-import time
+import yaml
+
 
 logging.basicConfig(filename=str(float(time.time())) + ".log",
                     filemode='a',
@@ -147,10 +146,10 @@ def get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_sh
 
   if config.eval.pmap:
     sampler = jax.pmap(sampler, axis_name='batch')
-    rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+    rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
     sample_rng = jnp.asarray(sample_rng)
   else:
-    rng, sample_rng = jax.random.split(rng, 2)
+    rng, sample_rng = random.split(rng, 2)
 
   q_samples, _ = sampler(sample_rng)
   # q_images = inverse_scaler(q_samples.copy())
@@ -232,14 +231,14 @@ def get_inpainting_observation(rng, x, config, mask_name='square'):
   " mask_name in ['square', 'half', 'inverse_square', 'lorem3'"
   x = flatten_vmap(x)
   mask, num_obs = get_mask(config.data.image_size, mask_name)
-  y = x + jax.random.normal(rng, x.shape) * config.sampling.noise_std
+  y = x + random.normal(rng, x.shape) * config.sampling.noise_std
   y = y * mask
   return x, y, mask, num_obs
 
 
 def get_superresolution_observation(rng, x, config, shape, method='square'):
   y = jax.image.resize(x, shape, method)
-  y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
+  y = y + random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
   y = flatten_vmap(y)
   x = flatten_vmap(x)
@@ -247,7 +246,7 @@ def get_superresolution_observation(rng, x, config, shape, method='square'):
   return x, y, mask, num_obs
 
 
-def get_blur_observation(rng, x, config):
+def get_blur_observation(rng, x, config, device=None):
   from bkse.models.kernel_encoding.kernel_wizard import KernelWizard
 
   def get_blur_model(opt_yml_path):
@@ -257,11 +256,11 @@ def get_blur_observation(rng, x, config):
     blur_model = KernelWizard(opt)
     blur_model.eval()
     blur_model.load_state_dict(torch.load(model_path))
-    blur_model = blur_model.to(self.device)
+    # blur_model = blur_model.to(device)
     return blur_model
 
   opt_yml_path = './bkse/options/generate_blur/default.yml'
-  blue_model = get_blur_model(opt_yml_path)
+  blur_model = get_blur_model(opt_yml_path)
 
   def observation_map(x):
     random_kernel = random.randn(1, config.image_size, 2, 2) * 1.2
@@ -270,7 +269,7 @@ def get_blur_observation(rng, x, config):
     return blurred
 
   y = observation_map(x)
-  y = y + jax.random.normal(rng, y.shape) * config.sampling.noise_std
+  y = y + random.normal(rng, y.shape) * config.sampling.noise_std
   num_obs = jnp.size(y)
   return x, y, observation_map, num_obs
 
@@ -611,10 +610,10 @@ def deblur(config, workdir, eval_folder="eval"):
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -626,7 +625,7 @@ def deblur(config, workdir, eval_folder="eval"):
   cs_methods, sde = get_sde(config)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
   ckpt = config.eval.begin_ckpt
 
   # Create data normalizer and its inverse
@@ -674,6 +673,7 @@ def deblur(config, workdir, eval_folder="eval"):
       x=jnp.array(x), y=y, noise_std=config.sampling.noise_std)
     print(observation_map)
     assert 0
+    adjoint_observation_map = None
 
     H = None
     cs_method = config.sampling.cs_method
@@ -687,13 +687,13 @@ def deblur(config, workdir, eval_folder="eval"):
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
           y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
         # sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
-        rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = random.split(rng, 2)
 
       q_samples, _ = sampler(sample_rng)
       q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
@@ -713,10 +713,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -728,7 +728,7 @@ def super_resolution(config, workdir, eval_folder="eval"):
   checkpoint_dir = workdir
   cs_methods, sde = get_sde(config)
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
   ckpt = config.eval.begin_ckpt
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
@@ -804,13 +804,13 @@ def super_resolution(config, workdir, eval_folder="eval"):
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
           y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
         # sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
-        rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = random.split(rng, 2)
 
       time_prev = time.time()
       q_samples, _ = sampler(sample_rng)
@@ -833,10 +833,10 @@ def inpainting(config, workdir, eval_folder="eval"):
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -848,7 +848,7 @@ def inpainting(config, workdir, eval_folder="eval"):
   cs_methods, sde = get_sde(config)
 
   # Create data normalizer and its inverse
-  scaler = datasets.get_data_scaler(config)
+  # scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Get model state from checkpoint file
@@ -870,7 +870,7 @@ def inpainting(config, workdir, eval_folder="eval"):
   print("sampling shape", sampling_shape)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
   num_sampling_rounds = 2
 
   x = get_asset_sample(config)
@@ -925,13 +925,13 @@ def inpainting(config, workdir, eval_folder="eval"):
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
           y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
         sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
-        rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = random.split(rng, 2)
 
       time_prev = time.time()
       q_samples, _ = sampler(sample_rng)
@@ -957,17 +957,19 @@ def sample(config,
     eval_folder: The subfolder for storing evaluation results. Default to
       "eval".
   """
+  num_devices =  int(jax.local_device_count()) if config.eval.pmap else 1
+
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -980,7 +982,7 @@ def sample(config,
   _, sde = get_sde(config)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
   ckpt = config.eval.begin_ckpt
 
   # Wait if the target checkpoint doesn't exist yet
@@ -1027,14 +1029,14 @@ def evaluate_inpainting(config,
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -1069,7 +1071,7 @@ def evaluate_inpainting(config,
   print("sampling shape", sampling_shape)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
   num_sampling_rounds = 2
 
   # Use inceptionV3 for images with resolution higher than 256.
@@ -1130,13 +1132,13 @@ def evaluate_inpainting(config,
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
           y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
         sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
-        rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = random.split(rng, 2)
 
       time_prev = time.time()
       q_samples, _ = sampler(sample_rng)
@@ -1177,14 +1179,14 @@ def evaluate_super_resolution(config,
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -1217,7 +1219,7 @@ def evaluate_super_resolution(config,
   print("sampling shape", sampling_shape)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -1275,13 +1277,13 @@ def evaluate_super_resolution(config,
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
           y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
         sampler = jax.pmap(sampler, axis_name='batch')
-        rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+        rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
         sample_rng = jnp.asarray(sample_rng)
       else:
-        rng, sample_rng = jax.random.split(rng, 2)
+        rng, sample_rng = random.split(rng, 2)
 
       time_prev = time.time()
       q_samples, _ = sampler(sample_rng)
@@ -1322,14 +1324,14 @@ def dps_search_inpainting(
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -1387,7 +1389,7 @@ def dps_search_inpainting(
   print("sampling shape", sampling_shape)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
 
   num_sampling_rounds = 10
 
@@ -1462,13 +1464,13 @@ def dps_search_inpainting(
       sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
         y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-    rng, sample_rng = jax.random.split(rng, 2)
+    rng, sample_rng = random.split(rng, 2)
     if config.eval.pmap:
       sampler = jax.pmap(sampler, axis_name='batch')
-      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
       sample_rng = jnp.asarray(sample_rng)
     else:
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
 
     time_prev = time.time()
     q_samples, _ = sampler(sample_rng)
@@ -1524,14 +1526,14 @@ def dps_search_super_resolution(config,
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
 
-  rng = jax.random.PRNGKey(config.seed + 1)
+  rng = random.PRNGKey(config.seed + 1)
 
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
   # Initialize model
-  rng, model_rng = jax.random.split(rng)
+  rng, model_rng = random.split(rng)
   score_model, init_model_state, initial_params = mutils.init_model(model_rng, config, num_devices)
   optimizer = losses.get_optimizer(config).create(initial_params)
   state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
@@ -1589,7 +1591,7 @@ def dps_search_super_resolution(config,
   print("sampling shape", sampling_shape)
 
   # Create different random states for different hosts in a multi-host environment (e.g., TPU pods)
-  rng = jax.random.fold_in(rng, jax.host_id())
+  rng = random.fold_in(rng, jax.host_id())
 
   num_sampling_rounds = 10
 
@@ -1660,13 +1662,13 @@ def dps_search_super_resolution(config,
       sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
         y, H, observation_map, adjoint_observation_map, stack_samples=False)
 
-    rng, sample_rng = jax.random.split(rng, 2)
+    rng, sample_rng = random.split(rng, 2)
     if config.eval.pmap:
       sampler = jax.pmap(sampler, axis_name='batch')
-      rng, *sample_rng = jax.random.split(rng, jax.local_device_count() + 1)
+      rng, *sample_rng = random.split(rng, jax.local_device_count() + 1)
       sample_rng = jnp.asarray(sample_rng)
     else:
-      rng, sample_rng = jax.random.split(rng, 2)
+      rng, sample_rng = random.split(rng, 2)
 
     time_prev = time.time()
     q_samples, _ = sampler(sample_rng)

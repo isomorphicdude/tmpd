@@ -31,7 +31,7 @@ def load_fid_stats(config):
   elif config.data.dataset == 'CELEBA':
     filename = 'assets/fid_stats_celeba.npz'
   elif config.data.dataset == 'LSUN':
-    filename = f'assets/fid_stats_lsun.npz'
+    filename = 'assets/fid_stats_lsun.npz'
   else:
     raise ValueError(f'Dataset {config.data.dataset} stats not found.')
 
