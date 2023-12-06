@@ -13,6 +13,7 @@ from diffusionjax.inverse_problems import (
     get_diag_jacfwd_guidance)
 from diffusionjax.solvers import EulerMaruyama
 from tmpd.solvers import (
+    MPGD,
     DPSDDPM, DPSDDPMplus,
     KPDDPM, KPSMLD,
     KPSMLDdiag, KPDDPMdiag,
@@ -131,6 +132,14 @@ def get_cs_sampler(config, sde, model, sampling_shape, inverse_scaler, y, H, obs
                             beta_min=config.model.beta_min,
                             beta_max=config.model.beta_max)
         sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler, stack_samples=stack_samples, denoise=True)
+    elif config.sampling.cs_method.lower()=='mpgd':
+        # Reproduce MPGD (et al. 2023) paper for VP SDE
+        outer_solver = MPGD(config.solver.mpgd_scale_hyperparameter, y, observation_map, config.sampling.noise_std, sampling_shape[1:], model, num_steps=config.solver.num_outer_steps,
+                            dt=config.solver.dt, epsilon=config.solver.epsilon,
+                            beta_min=config.model.beta_min,
+                            beta_max=config.model.beta_max)
+        sampler = get_sampler(sampling_shape, outer_solver, inverse_scaler=inverse_scaler,
+                              stack_samples=stack_samples, denoise=True)
     elif config.sampling.cs_method.lower()=='dpsddpm':
         score = model
         # Reproduce DPS (Chung et al. 2022) paper for VP SDE

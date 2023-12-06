@@ -24,6 +24,7 @@ from diffusionjax.utils import get_sampler, batch_matmul_A
 from diffusionjax.run_lib import get_solver, get_markov_chain, get_ddim_chain
 from tmpd.samplers import get_cs_sampler
 from tmpd.inpainting import get_mask
+from tmpd.plot import plot_animation
 import matplotlib.pyplot as plt
 from tensorflow.image import ssim as tf_ssim
 from tensorflow.image import psnr as tf_psnr
@@ -213,14 +214,14 @@ def get_sde(config):
       # VE/SMLD methods with mask
       cs_methods = [
                     # 'KPSMLDdiag',
-                    'TMPD2023bvjpplus',
+                    # 'TMPD2023bvjpplus',
                     'KPSMLDplus',
                     'DPSSMLDplus',
                     'PiGDMVEplus',
                     'KGDMVEplus',
-                    'chung2022scalarplus',  
-                    'chung2022plus',  
-                    'Song2023plus',
+                    # 'chung2022scalarplus',  
+                    # 'chung2022plus',  
+                    # 'Song2023plus',
                     ]
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
@@ -731,8 +732,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
   rng = random.fold_in(rng, jax.host_id())
   ckpt = config.eval.begin_ckpt
   # Create data normalizer and its inverse
+
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
+
   # Get model state from checkpoint file
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}".format(ckpt))
   if not tf.io.gfile.exists(ckpt_filename):
@@ -749,22 +752,23 @@ def super_resolution(config, workdir, eval_folder="eval"):
     config.eval.batch_size//num_devices,
     config.data.image_size, config.data.image_size, config.data.num_channels)
   print("sampling shape", sampling_shape)
-  shape=(config.eval.batch_size, config.data.image_size//8, config.data.image_size//8, config.data.num_channels)
-  method='bicubic'  # 'bicubic'
+  shape=(
+    config.eval.batch_size, config.data.image_size//4, config.data.image_size//4, config.data.num_channels)
+  method='nearest'  # 'bicubic'
   num_sampling_rounds = 3
 
-  # x = get_asset_sample(config)
-  # _, y, *_ = get_superresolution_observation(
-  #   rng, x, config,
-  #   shape=shape,
-  #   method=method)
+  x = get_asset_sample(config)
+  _, y, *_ = get_superresolution_observation(
+    rng, x, config,
+    shape=shape,
+    method=method)
   for i in range(num_sampling_rounds):
-    x = get_eval_sample(scaler, config, num_devices)
+    # x = get_eval_sample(scaler, config, num_devices)
     # x = get_prior_sample(rng, score_fn, epsilon_fn, sde, inverse_scaler, sampling_shape, config, eval_folder)
-    _, y, *_ = get_superresolution_observation(
-      rng, x, config,
-      shape=shape,
-      method=method)
+    # _, y, *_ = get_superresolution_observation(
+    #   rng, x, config,
+    #   shape=shape,
+    #   method=method)
     plot_samples(
       inverse_scaler(x.copy()),
       image_size=config.data.image_size,
@@ -799,10 +803,10 @@ def super_resolution(config, workdir, eval_folder="eval"):
       config.sampling.cs_method = cs_method
       if cs_method in ddim_methods:
         sampler = get_cs_sampler(config, sde, epsilon_fn, sampling_shape, inverse_scaler,
-          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+          y, H, observation_map, adjoint_observation_map, stack_samples=config.sampling.stack_samples)
       else:
         sampler = get_cs_sampler(config, sde, score_fn, sampling_shape, inverse_scaler,
-          y, H, observation_map, adjoint_observation_map, stack_samples=False)
+          y, H, observation_map, adjoint_observation_map, stack_samples=config.sampling.stack_samples)
 
       rng, sample_rng = random.split(rng, 2)
       if config.eval.pmap:
@@ -816,12 +820,50 @@ def super_resolution(config, workdir, eval_folder="eval"):
       q_samples, _ = sampler(sample_rng)
       sample_time = time.time() - time_prev
       print("{}: {}s".format(cs_method, sample_time))
-      q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
-      plot_samples(
-        q_samples,
-        image_size=config.data.image_size,
-        num_channels=config.data.num_channels,
-        fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
+      if config.sampling.stack_samples:
+        q_samples = q_samples.reshape(
+          (config.solver.num_outer_steps, config.eval.batch_size,) + sampling_shape[1:])
+        frames = 100
+
+        fig = plt.figure(figsize=[1,1])
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis('off')
+        ax.set_frame_on(False)
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        img = image_grid(
+          q_samples[-1],
+          config.data.image_size, config.data.num_channels)
+        im = ax.imshow(img, interpolation=None)
+        fig.tight_layout()
+        def animate(i, ax):
+          ax.clear()
+          idx = 1000 - int((i + 1) * config.solver.num_outer_steps / frames)
+          img = image_grid(
+            q_samples[idx],
+            config.data.image_size, config.data.num_channels)
+          ax.imshow(img, interpolation=None)
+
+        # Plot animation of the trained score over time
+        plot_animation(fig, ax,
+                       animate, frames,
+                       fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i),
+                       bitrate=1000,
+                       dpi=300,
+                       )
+        plot_samples(
+          q_samples[0],
+          image_size=config.data.image_size,
+          num_channels=config.data.num_channels,
+          fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
+
+      else:
+        q_samples = q_samples.reshape((config.eval.batch_size,) + sampling_shape[1:])
+        plot_samples(
+          q_samples,
+          image_size=config.data.image_size,
+          num_channels=config.data.num_channels,
+          fname=eval_folder + "/{}_{}_{}_{}".format(config.data.dataset, config.sampling.noise_std, config.sampling.cs_method.lower(), i))
 
 
 def inpainting(config, workdir, eval_folder="eval"):

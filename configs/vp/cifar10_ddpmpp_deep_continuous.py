@@ -67,21 +67,25 @@ def get_config():
   # optim
   config.seed = 2023
 
-  # sampling.cs_method = 'TMPD2023bvjpplus'
+  sampling.cs_method = 'TMPD2023bvjpplus'
+  # sampling.cs_method = 'TMPD2023bvjp'
 
-  sampling.noise_std = 0.1
+  sampling.noise_std = 0.01
   sampling.denoise = True
   sampling.innovation = True
   sampling.inverse_scaler = None
   eval = config.eval
   eval.begin_ckpt = 8  # 12
   eval.end_ckpt = 8  # 12
-  eval.batch_size = 4
+  eval.batch_size = 1
   eval.pmap = False
   solver = config.solver
   # solver.outer_solver = 'eulermaruyama'
   solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter
+
+  solver.dps_scale_hyperparameter = 0.5
+  solver.mpgd_scale_hyperparameter = 0.
 
   return config

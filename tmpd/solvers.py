@@ -1,8 +1,65 @@
 """Markov Chains."""
 import jax.numpy as jnp
-from jax import random, grad, vmap, vjp, jacrev, value_and_grad
+from jax import random, grad, vmap, vjp, jacrev
 from diffusionjax.utils import batch_mul
 from diffusionjax.solvers import DDIMVP, DDIMVE, SMLD, DDPM
+
+
+class MPGD(DDIMVP):
+  """
+  TODO: This method requires a pretrained autoencoder.
+  MPGD He, Murata et al. https://arxiv.org/pdf/2311.16424.pdf"""
+  
+  def __init__(self, scale, y, observation_map, noise_std, shape, model, eta=0.0, num_steps=1000, dt=None, epsilon=None, beta_min=0.1, beta_max=20.):
+    super().__init__(model, eta, num_steps, dt, epsilon, beta_min, beta_max)
+    self.observation_map = observation_map
+    self.batch_observation_map = vmap(observation_map)
+    self.likelihood_score = self.get_likelihood_score(self.batch_observation_map)
+    self.likelihood_score_vmap = self.get_likelihood_score_vmap(self.observation_map)
+    self.scale = scale
+    self.y = y
+    self.noise_std = noise_std
+    self.num_y = y.shape[1]
+    self.axes = (0,) + tuple(range(len(shape) + 2)[2:]) + (1,)
+    self.axes_vmap = tuple(range(len(shape) + 1)[1:]) + (0,)
+
+  def get_likelihood_score_vmap(self, observation_map):
+    def l2_norm(x_0, y):
+      x_0 = x_0
+      norm = jnp.linalg.norm(y - observation_map(x_0))
+      return norm**2 / self.noise_std
+    grad_l2_norm = grad(l2_norm)
+    return vmap(grad_l2_norm)
+
+  def get_likelihood_score(self, batch_observation_map):
+    batch_norm = vmap(jnp.linalg.norm)
+    def l2_norm(x_0, y):
+      norm = batch_norm(y - batch_observation_map(x_0))
+      squared_norm = jnp.sum(norm**2)
+      return squared_norm / self.noise_std
+    grad_l2_norm = grad(l2_norm)
+    return grad_l2_norm
+
+  def posterior(self, x, t):
+    epsilon = self.model(x, t)
+    timestep = (t * (self.num_steps - 1) / self.t1).astype(jnp.int32)
+    m = self.sqrt_alphas_cumprod[timestep]
+    sqrt_1m_alpha = self.sqrt_1m_alphas_cumprod[timestep]
+    v = sqrt_1m_alpha**2
+    alpha = m**2
+    m_prev = self.sqrt_alphas_cumprod_prev[timestep]
+    v_prev = self.sqrt_1m_alphas_cumprod_prev[timestep]**2
+    alpha_prev = m_prev**2
+    x_0 = batch_mul((x - batch_mul(sqrt_1m_alpha, epsilon)), 1. / m)
+    # TODO: manifold projection step here which requires autoencoder to project x_0 such that likelihood score is projected onto tangent space of autoencoder
+    # ls = self.likelihood_score(x_0, self.y)
+    ls = self.likelihood_score_vmap(x_0, self.y)
+    x_0 = x_0 - self.scale * ls
+    coeff1 = self.eta * jnp.sqrt((v_prev / v) * (1 - alpha / alpha_prev))
+    coeff2 = jnp.sqrt(v_prev - coeff1**2)
+    x_mean = batch_mul(m_prev, x_0) + batch_mul(coeff2, epsilon)
+    std = coeff1
+    return x_mean, std
 
 
 class KGDMVP(DDIMVP):
@@ -442,14 +499,14 @@ class KPSMLD(SMLD):
     x_0 = self.batch_analysis_vmap(self.y, x, t, timestep, sigma**2)
     x_mean = batch_mul(sigma_prev**2 / sigma**2, x) + batch_mul(1 - sigma_prev**2 / sigma**2, x_0)
     std = jnp.sqrt((sigma_prev**2 * (sigma**2 - sigma_prev**2)) / (sigma**2))
-    return x_mean, std
+    return x_mean, std, x_0
 
   def update(self, rng, x, t):
     """Return the update of the state and any auxilliary variables."""
-    x_mean, std = self.posterior(x, t)
+    x_mean, std, x_0 = self.posterior(x, t)
     z = random.normal(rng, x.shape)
     x = x_mean + batch_mul(std, z)
-    return x, x_mean
+    return x, x_0
 
 
 class KPSMLDplus(KPSMLD):
@@ -465,22 +522,22 @@ class KPSMLDplus(KPSMLD):
 class KPSMLDdiag(KPSMLD):
   """Kalman posterior for SMLD Ancestral sampling."""
 
-  def get_grad_estimate_x_0_vmap(self, observation_map):
-    """https://stackoverflow.com/questions/70956578/jacobian-diagonal-computation-in-jax"""
+  # def get_grad_estimate_x_0_vmap(self, observation_map):
+  #   """https://stackoverflow.com/questions/70956578/jacobian-diagonal-computation-in-jax"""
 
-    def estimate_x_0_single(val, i, x, t, timestep):
-      x_shape = x.shape
-      x = x.flatten()
-      x = x.at[i].set(val)
-      x = x.reshape(x_shape)
-      x = jnp.expand_dims(x, axis=0)
-      t = jnp.expand_dims(t, axis=0)
-      v = self.discrete_sigmas[timestep]**2
-      s = self.score(x, t)
-      x_0 = x + v * s
-      h_x_0 = observation_map(x_0)
-      return h_x_0[i]
-    return vmap(value_and_grad(estimate_x_0_single), in_axes=(0, 0, None, None, None))
+  #   def estimate_x_0_single(val, i, x, t, timestep):
+  #     x_shape = x.shape
+  #     x = x.flatten()
+  #     x = x.at[i].set(val)
+  #     x = x.reshape(x_shape)
+  #     x = jnp.expand_dims(x, axis=0)
+  #     t = jnp.expand_dims(t, axis=0)
+  #     v = self.discrete_sigmas[timestep]**2
+  #     s = self.score(x, t)
+  #     x_0 = x + v * s
+  #     h_x_0 = observation_map(x_0)
+  #     return h_x_0[i]
+  #   return vmap(value_and_grad(estimate_x_0_single), in_axes=(0, 0, None, None, None))
 
   def analysis(self, y, x, t, timestep, ratio):
     h_x_0, vjp_h_x_0, (_, x_0) = vjp(

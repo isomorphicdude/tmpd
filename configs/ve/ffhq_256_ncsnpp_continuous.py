@@ -70,6 +70,7 @@ def get_config():
   config.seed = 2023
   sampling.cs_method = 'TMPD2023bvjpplus'
 
+  sampling.stack_samples = True
   sampling.noise_std = 0.05
   sampling.denoise = True
   sampling.inverse_scaler = None

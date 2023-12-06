@@ -4,6 +4,7 @@ import jax.random as random
 from scipy.stats import wasserstein_distance
 import numpy as np
 import scipy
+import matplotlib.animation as animation
 
 
 BG_ALPHA = 1.0
@@ -13,6 +14,20 @@ color_posterior = '#a2c4c9'
 color_algorithm = '#ff7878'
 dpi_val = 1200
 cmap = 'magma'
+
+
+def plot_animation(fig, ax, animate, frames, fname, fps=20, bitrate=800, dpi=300):
+  ani = animation.FuncAnimation(
+    fig, animate, frames=frames, interval=1, fargs=(ax,))
+  # Set up formatting for the movie files
+  Writer = animation.PillowWriter
+#   Writer = animation.FFMpegWriter
+  # To save the animation using Pillow as a gif
+  writer = Writer(fps=fps, metadata=dict(artist='Me'), bitrate=bitrate)
+  # Note that mp4 does not work on pdf
+#   ani.save('{}.mp4'.format(fname), writer=writer)
+  ani.save('{}.gif'.format(fname), writer=writer, dpi=dpi)
+#   plt.show()
 
 
 def plot_single_image(noise_std, dim, dim_y, timesteps, i, name, indices, samples, color=color_algorithm):
