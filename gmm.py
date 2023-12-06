@@ -2,7 +2,7 @@
 from absl import app, flags
 from ml_collections.config_flags import config_flags
 import jax
-from jax import jit, vmap, grad, jacfwd, vjp
+from jax import vmap, grad
 import jax.random as random
 import jax.numpy as jnp
 from jax.tree_util import Partial as partial
@@ -10,24 +10,19 @@ import numpyro.distributions as dist
 import pandas as pd
 from tqdm import trange
 import torch
-from torch import tensor, ones, eye, randn_like, randn, vstack, manual_seed
-from torch.utils.data import Dataset
+from torch import eye, randn_like, vstack, manual_seed
 from torch.distributions import MixtureSameFamily, MultivariateNormal, Categorical
-from diffusionjax.plot import (plot_samples, plot_score,
-     plot_heatmap, plot_scatter)
+from diffusionjax.plot import plot_heatmap
 from diffusionjax.utils import get_sampler
-from diffusionjax.run_lib import get_model, NumpyLoader, train, get_solver, get_markov_chain, get_ddim_chain
+from diffusionjax.run_lib import get_ddim_chain
 import diffusionjax.sde as sde_lib
 from tmpd.samplers import get_cs_sampler
 from tmpd.plot import plot_single_image, plot_image
-from flax import serialization
 import numpy as np
-import time
-import os
 import logging
 import ot
-import matplotlib.pyplot as plt
 from scipy.stats import wasserstein_distance
+import time
 
 
 FLAGS = flags.FLAGS
@@ -39,7 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 def sliced_wasserstein(dist_1, dist_2, n_slices=100):
-    projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
+    # projections = torch.randn(size=(n_slices, dist_1.shape[1])).to(dist_1.device)
+    projections = torch.randn(size=(n_slices, dist_1.shape[1]))
     projections = projections / torch.linalg.norm(projections, dim=-1)[:, None]
     dist_1_projected = (projections @ dist_1.T)
     dist_2_projected = (projections @ dist_2.T)
@@ -181,7 +177,6 @@ def main(argv):
         means = []
         for i in range(-2, 3):
             means += [torch.tensor([-size * i, - size * j]*(config.data.image_size//2)).to(device) for j in range(-2, 3)]
-        # weights = torch.randn(len(means))**2
         weights = torch.ones(len(means))
         weights = weights / weights.sum()
         ou_mixt_fun = partial(ou_mixt,
@@ -201,25 +196,15 @@ def main(argv):
         mixt = ou_mixt_fun(1)
         target_samples = mixt.sample((config.eval.batch_size,))
         logging.info("target prior:\nmean {},\nvar {}".format(np.mean(target_samples.numpy(), axis=0), np.var(target_samples.numpy(), axis=0)))
-        # plot_samples(target_samples.numpy(),
-        #     lims=((-size * 2.5, size * 2.5), (-size * 2.5, size * 2.5)),
-        #     index=(0, 1), fname="target prior scatter")
-        # plot_heatmap(samples=target_samples.numpy(), area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10, fname="target prior heatmap")
 
         # Plot prior samples
         score = get_score_fn(ou_mixt_jax_fun, sde)
         model = get_model_fn(ou_mixt_jax_fun, sde)
-        # plot_score(
-        #     score=score,
-        #     scaler=lambda x: x,
-        #     t=0.01, area_min=-size * 2.5, area_max=size * 2.5, fname="gmm score 0,01")
-        # outer_solver, inner_solver = get_solver(config, sde, score)
 
         # outer_solver = get_markov_chain(config, score)
         outer_solver = get_ddim_chain(config, model)
         inner_solver = None
 
-        inverse_scaler = None
         sampling_shape = (config.eval.batch_size//num_devices, config.data.image_size)
         sampler = get_sampler(sampling_shape, outer_solver,
                             inner_solver, denoise=config.sampling.denoise,
@@ -228,7 +213,6 @@ def main(argv):
         samples, nfe = sampler(sample_rng)
         logging.info("diffusion prior:\nmean {},\nvar {}".format(np.mean(samples, axis=0), np.var(samples, axis=0)))
         plot_single_image(config.sampling.noise_std, dim, '_', 1000, i, 'prior', [0, 1], samples, color=color_algorithm)
-        # plot_heatmap(samples=samples, area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10, fname="diffusion prior heatmap")
 
         for ind_ptg, dim_y in enumerate([1, 2, 4]):
             for i in trange(0, num_repeats, unit="trials dim_y={}".format(dim_y)):
@@ -244,69 +228,48 @@ def main(argv):
                 posterior_samples_torch = posterior.sample((config.eval.batch_size,)).to(device)
                 posterior_samples = posterior_samples_torch.numpy()
                 plot_single_image(config.sampling.noise_std, dim, dim_y, 1000, i, 'posterior', [0, 1], posterior_samples, color=color_posterior)
-                # plot_samples(
-                #     samples=posterior_samples, index=(0, 1), fname="true posterior scatter {}".format(i),
-                #     lims=((-size * 2.5, size * 2.5), (-size * 2.5, size * 2.5)))
-                # plot_heatmap(samples=posterior_samples, area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10, fname="true posterior heatmap {}".format(i))
 
                 y = jnp.array(init_obs.numpy(), dtype=jnp.float32)
+                y = jnp.tile(y, (config.eval.batch_size//num_devices, 1))
                 H = jnp.array(A.numpy(), dtype=jnp.float32)
-                mask = None
 
                 def observation_map(x):
+                    x = x.flatten()
                     return H @ x
 
                 def adjoint_observation_map(y):
+                    y = y.flatten()
                     return H.T @ y
 
-                # Cannot use plus methods due to H
-                # cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023avjp', 'Boys2023b']
-                # cs_methods = ['ProjectionKalmanFilter', 'Song2023', 'Boys2023avjp', 'Boys2023b', 'Chung2022']
-                # cs_methods = ['DPS', 'Chung2022', 'chung2022scalar']
-                # cs_methods = ['KPDDPM', 'ProjectionKalmanFilter']
                 ddim_methods = ['PiGDMVP', 'PiGDMVE', 'DDIMVE', 'DDIMVP', 'KGDMVP', 'KGDMVE']
-                # cs_methods = ['KGDMVP']
-                # cs_methods = ['Song2023', 'ProjectionKalmanFilter', 'Chung2022', 'Boys2023b', 'Boys2023ajacfwd', 'Boys2023ajacrev', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
-                # cs_methods = []
-                cs_methods = ['Song2023', 'Chung2022', 'Boys2023avjp', 'Boys2023b', 'PiGDMVP', 'DPSDDPM', 'KPDDPM', 'KGDMVP']
-                # cs_methods = ['DPSDDPM', 'KPDDPM', 'KGDMVP', 'PiGDMVP']
-                # cs_methods = ['Boys2023avjp', 'Boys2023ajvp']
-                # cs_methods = ['Boys2023ajacrev', 'Boys2023ajacfwd']
+                cs_methods = ['KPDDPM', 'KPDDPMdiag', 'DPSDDPM', 'PiGDMVP']
+                # cs_methods = ['TMPD2023avjp', 'TMPD2023bvjp', 'Chung2022scalar', 'Song2023']
 
-                cs_samples = []
                 for cs_method in cs_methods:
                     config.sampling.cs_method = cs_method
-                    # get cs sampler
                     fn = model if cs_method in ddim_methods else score
                     sampler = get_cs_sampler(
                         config, sde, fn, (config.eval.batch_size//num_devices, config.data.image_size),
                         None,  # dataset.get_data_inverse_scaler(config),
-                        y, dim_y,
-                        H, observation_map, adjoint_observation_map, stack_samples=config.sampling.stack_samples)
+                        y, H, observation_map, adjoint_observation_map,
+                        stack_samples=config.sampling.stack_samples)
 
-                    samples, nfe = sampler(sample_rng)
+                    time_prev = time.time()
+                    samples, _ = sampler(sample_rng)
+                    sample_time = time.time() - time_prev
 
                     if config.sampling.stack_samples:
                         samples = samples.reshape(
                             config.solver.num_outer_steps, config.eval.batch_size, config.data.image_size)
-                        # plot_heatmap(
-                        #     samples=samples[0], area_min=-size * 2.5, area_max=size * 2.5, fname="{} heatmap conditional".format(
-                        #         config.sampling.cs_method))
-                        for j in range(0, config.solver.num_outer_steps, 100):
-                            pass
-                            # plot_samples(samples=samples[i, :, :], index=(0, 1),
-                            #             lims=((-size * 2.5, size * 2.5), (-size * 2.5, size * 2.5)),
-                            #             fname="{} scatter conditional {}".format(config.sampling.cs_method, j))
-                            # plot_heatmap(
-                            #     samples=samples[i], area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10.0, fname="{} heatmap conditional {}".format(
-                            #         config.sampling.cs_method, j))
-                        # plot_heatmap(samples=samples, area_min=-size * 2.5, area_max=size * 2.5, fname="{} heatmap conditional".format(config.sampling.cs_method))
+                        plot_heatmap(
+                            samples=samples[0], area_min=-size * 2.5, area_max=size * 2.5, fname="{} heatmap conditional".format(
+                                config.sampling.cs_method))
                     else:
                         samples = samples.reshape(config.eval.batch_size, config.data.image_size)
                         sliced_wasserstein_distance = sliced_wasserstein(dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
                         ot_sliced_wasserstein_distance = ot_sliced_wasserstein(seed=seed_num_inv_problem, dist_1=np.array(posterior_samples), dist_2=np.array(samples), n_slices=10000)
 
-                        print("{}".format(config.sampling.cs_method), sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
+                        print("sample_time: {}, {}".format(sample_time, config.sampling.cs_method), sliced_wasserstein_distance, ot_sliced_wasserstein_distance)
 
                         dists_infos.append({"seed": seed_num_inv_problem,
                                             "dim": config.data.image_size,
@@ -318,17 +281,11 @@ def main(argv):
                                             "distance": sliced_wasserstein_distance,
                                             "ot_distance": ot_sliced_wasserstein_distance
                                             })
-                        # Plot the image for the paper!
                         plot_image(config.sampling.noise_std, dim, dim_y, 1000, i, cs_method, [0, 1], samples, posterior_samples)
-                        # these are alternative plots!
-                        # plot_heatmap(samples=samples, area_min=-size * 2.5, area_max=size * 2.5, lengthscale=10.0, fname="{} heatmap conditional {}".format(config.sampling.cs_method, i))
-                        # plot_samples(samples=samples, index=(0, 1),
-                        #                 lims=((-size * 2.5, size * 2.5), (-size * 2.5, size * 2.5)),
-                        #                 fname="{} scatter conditional {}".format(config.sampling.cs_method, i))
 
-                pd.DataFrame.from_records(dists_infos).to_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std), float_format='%.3f')
+                pd.DataFrame.from_records(dists_infos).to_csv(workdir + '/{}_{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.cs_method, config.sampling.noise_std), float_format='%.3f')
 
-            data = pd.read_csv(workdir + '/{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.noise_std))
+            data = pd.read_csv(workdir + '/{}_{}_gmm_inverse_problem_comparison.csv'.format(config.sampling.cs_method, config.sampling.noise_std))
             agg_data = data.groupby(['dim', 'dim_y', 'num_steps', 'algorithm', 'distance_name']).distance.apply(lambda x: f'{np.nanmean(x):.1f} ± {1.96 * np.nanstd(x) / (x.shape[0]**.5):.1f}').reset_index()
 
             agg_data_sw = agg_data.loc[agg_data.distance_name == 'sw'].pivot(index=('dim', 'dim_y', 'num_steps'), columns='algorithm', values=['distance']).reset_index()
@@ -337,7 +294,7 @@ def main(argv):
             for col in agg_data_sw.columns:
                 if col not in ['dim', 'dim_y', 'num_steps']:
                     agg_data_sw[col + '_num'] = agg_data_sw[col].apply(lambda x: float(x.split(" ± ")[0]))
-            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '/{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.noise_std))
+            agg_data_sw.loc[agg_data_sw.num_steps == 1000].to_csv(workdir + '/{}_{}_gmm_inverse_problem_aggregated_sliced_wasserstein_1000_steps.csv'.format(config.sampling.cs_method, config.sampling.noise_std))
 
 
 if __name__ == "__main__":

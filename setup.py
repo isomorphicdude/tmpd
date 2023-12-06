@@ -21,12 +21,11 @@ extra_link_args = []
 setup(
     name="tmpd",
     version="0.0.0",
-    description="tmpd is a diffusion package for solving linear inverse problems",
+    description="tmpd is a diffusion package for linear inverse problems",
     long_description=README,
     long_description_content_type="text/markdown",
     license="MIT",
     packages=find_packages(exclude=['*.test']),
-    include_package_data=True,
     install_requires=[
         'ml-collections==0.1.1',
         'tensorflow-gan==2.0.0',
@@ -38,8 +37,38 @@ setup(
         'scipy',
         'h5py',
         'matplotlib',
+        'scikit-image',
+        'lpips',
         'absl-py==0.10.0',
         'flax==0.3.3',
         'diffusionjax',
-         ]
-    )
+         ],
+    extras_require={
+        'linting': [
+        "flake8",
+        "pylint",
+        "mypy",
+        "typing-extensions",
+        "pre-commit",
+        "ruff",
+        'jaxtyping',
+        ],
+        'testing': [
+        "pytest",
+        "pytest-xdist",
+        "pytest-cov",
+        "coveralls",
+        "jax>=0.4.1",
+        "jaxlib>=0.4.1",
+        "setuptools_scm[toml]",
+        "setuptools_scm_git_archive",
+        ],
+        'examples': [
+        "torch",
+        "mlkernels",
+        "numpyro",
+        "pandas",
+        "POT",
+        ],
+    },
+    include_package_data=True)

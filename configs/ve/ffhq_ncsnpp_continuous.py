@@ -52,7 +52,6 @@ def get_config():
   # evaluate.begin_ckpt = 1
   # evaluate.end_ckpt = 96
 
-  # TODO: BB added this since only one checkpoint is given
   # evaluation
   # evaluate = config.eval
   evaluate.begin_ckpt = 60
@@ -67,7 +66,7 @@ def get_config():
   data.uniform_dequantization = False
   data.num_channels = 3
   # Plug in your own path to the tfrecords file.
-  data.tfrecords_path = '/raid/song/ffhq-dataset/ffhq/ffhq-r10.tfrecords'
+  # data.tfrecords_path =
 
   # model
   config.model = model = ml_collections.ConfigDict()

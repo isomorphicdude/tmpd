@@ -1,6 +1,11 @@
-Tweedie Moment Projected Diffusions for Inverse Problems
+[Tweedie Moment Projected Diffusions for Inverse Problems](https://arxiv.org/pdf/2310.06721.pdf)
 ========================================================
-This repo contains the official implementation for the paper Tweedie Moment Projected Diffusions for Inverse Problems.
+
+![result-git0](./readme_FFHQ_0.05.gif)
+
+This repo contains the official implementation for the paper [Tweedie Moment Projected Diffusions for Inverse Problems](https://arxiv.org/pdf/2310.06721.pdf). An example of an application to a particular inverse problem, noisy super-resolution on FFHQ is below. The animation is of the expected value of a particular sample of an image over the time steps of our algorithm.
+
+![cover-img1](./readme_FFHQ_0.05.png)
 
 Contents:
 - [Installation](#installation)
@@ -13,11 +18,20 @@ Contents:
 ## Installation
 The package requires Python 3.7. First, it is recommended to [create a new python virtual environment](https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands). 
 Install `tensorflow=2.7.0`. This package depends on an old version of tensorflow to be compatible with the pretrained diffusion models. First, [install tensorflow 2.7.0](https://www.tensorflow.org/install/pip).
+
+```
+pip install --upgrade pip
+conda install -c conda-forge cudatoolkit=11.8.0
+python3 -m pip install nvidia-cudnn-cu11==8.6.0.163 tensorflow==2.7.0
+```
+
 Install `jax==0.2.18`. This package depends on an old version JAX to be compatible with the pretrained diffusion models. Note the JAX installation is different depending on your CUDA version, so you may have to install JAX differently than below.
 ```sh
 'pip install jax==0.2.18 jaxlib==0.1.69+cuda111 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
 ```
+
 Make sure the tensorflow and jax versions are as above and are working on your accelerator. Then,
+- Install `diffusionjax` (you may need to remove the dependency of orbax and optax, which conflicts with Python 3.7).
 - Clone the repository https://github.com/fedebotu/clone-anonymous-github
 - Install using pip `pip install -e .` from the working directory of this README file (see the `setup.py` for the requirements that this command installs).
 
@@ -38,7 +52,7 @@ Reproduce our experiment by typing
 ```sh
 python gmm.py:
   --config: Training configuration.
-    (default: './configs/example2.py')
+    (default: './configs/gmm.py')
   --workdir: Working directory
     (default: './workdir')
 ```
@@ -51,15 +65,15 @@ You will require the pre-trained model checkpoints to access the score models. A
 
 Please note that if for any reason you need to download the CelebAHQ and/or FFHQ datasets, you will need to manually download them using these [instructions](https://github.com/tkarras/progressive_growing_of_gans#preparing-datasets-for-training). 
 
-Reproduce our inpainting, super_resolution and deblur experiments through `main.py`.
+Reproduce our inpainting, super_resolution and deblur experiments through `main.py`. Please first 
+download the FID statistics for CIFAR-10 using these [instructions](https://github.com/yang-song/score_sde/tree/main#:~:text=Stats%20files%20for%20quantitative%20evaluation) and place them into the `assets/` folder in the working directory of this README file.
 ```sh
 python main.py:
   --config: Configuration.
-    (default: 'None')
-  --eval_folder: The folder name for storing evaluation results
+  --eval_folder: The folder name for storing evaluation results.
     (default: 'eval')
-  --mode: <inpainting|super_resolution|deblur>: Running mode: inpainting, super_resolution or deblur
-  --workdir: Working directory
+  --mode: <eval_inpainting|eval_super_resolution|eval_deblur>: Run evaluation on: inpainting, super_resolution or deblur.
+  --workdir: Working directory.
 ```
 
 * `config` is the path to the config file. They are adapted from [https://github.com/yang-song/score_sde/tree/main#:~:text=workdir%3A%20Working%20directory-,config,-is%20the%20path](here). Our prescribed config files are provided in `configs/`.
@@ -72,3 +86,12 @@ python main.py:
 
 The experimental setup can be configured through the config file and the experimental parameters within `run_lib.py`.
 
+We also provide scripts to simply sample from either inpainting, super_resolution and deblur experiments through `main.py`.
+```sh
+python main.py:
+  --config: Configuration.
+  --eval_folder: The folder name for storing evaluation results.
+    (default: 'eval')
+  --mode: <inpainting|super_resolution|deblur>: Run sampling on: inpainting, super_resolution or deblur.
+  --workdir: Working directory.
+```

@@ -1,5 +1,4 @@
 """Config for `gmm.py`."""
-
 from configs.default_cs_configs import get_default_configs
 
 
@@ -30,7 +29,7 @@ def get_config():
     # sampling
     sampling = config.sampling
     sampling.cs_method = None
-    sampling.noise_std = 0.01
+    sampling.noise_std = 1.0
     sampling.denoise = True  # work out what denoise_override is
     sampling.innovation = True  # this will probably be superceded
     sampling.inverse_scaler = None
@@ -46,7 +45,6 @@ def get_config():
     # for vp
     model.beta_min = 0.1
     model.beta_max = 25.0  # 200 also works, depends on time step size
-    # needs to be tuned
     # for ve
     model.sigma_min = 0.01
     model.sigma_max = 10.

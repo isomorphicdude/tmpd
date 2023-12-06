@@ -2,7 +2,6 @@ import ml_collections
 
 
 def get_default_configs():
-    # TODO: complete this and remove irrelevant. If add anything, needs to be a different name
     config = ml_collections.ConfigDict()
     # training
     config.training = training = ml_collections.ConfigDict()

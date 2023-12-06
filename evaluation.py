@@ -1,20 +1,4 @@
-# coding=utf-8
-# Copyright 2020 The Google Research Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """Utility functions for computing FID/Inception scores."""
-
 import jax
 import numpy as np
 import six
@@ -40,14 +24,26 @@ def get_inception_model(inceptionv3=False):
     return tfhub.load(INCEPTION_TFHUB)
 
 
+def load_fid_stats(config):
+  """Load the pre-computed dataset statistics."""
+  if config.data.dataset == 'CIFAR10':
+    filename = 'assets/fid_stats_cifar10.npz'
+  elif config.data.dataset == 'CELEBA':
+    filename = 'assets/fid_stats_celeba.npz'
+  elif config.data.dataset == 'LSUN':
+    filename = 'assets/fid_stats_lsun.npz'
+  else:
+    raise ValueError(f'Dataset {config.data.dataset} stats not found.')
+
+  with tf.io.gfile.GFile(filename, 'rb') as fin:
+    stats = np.load(fin)
+    return stats
+
+
 def load_dataset_stats(config):
   """Load the pre-computed dataset statistics."""
   if config.data.dataset == 'CIFAR10':
-    filename = 'assets/stats/cifar10_stats.npz'
-  elif config.data.dataset == 'CELEBA':
-    filename = 'assets/stats/celeba_stats.npz'
-  elif config.data.dataset == 'LSUN':
-    filename = f'assets/stats/lsun_{config.data.category}_{config.data.image_size}_stats.npz'
+    filename = 'assets/cifar10_stats.npz'
   else:
     raise ValueError(f'Dataset {config.data.dataset} stats not found.')
 

@@ -61,7 +61,8 @@ def get_config():
   data.random_flip = True
   data.uniform_dequantization = False
   data.num_channels = 3
-  data.tfrecords_path = '/atlas/u/yangsong/celeba_hq/-r10.tfrecords'
+  # Plug in your own path to the tfrecords file.
+  # data.tfrecords_path =
 
   # model
   config.model = model = ml_collections.ConfigDict()

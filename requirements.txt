@@ -1,9 +1,0 @@
-# Requirements for development, testing, and documentation.
--e .
-pytest
-pytest-cov
-coveralls
-jax==0.2.18
-jaxlib==0.1.69
-setuptools_scm[toml]
-setuptools_scm_git_archive

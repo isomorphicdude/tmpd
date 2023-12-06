@@ -63,7 +63,6 @@ def get_config():
   model.fourier_scale = 16
   model.conv_size = 3
 
-  # TODO BB stuff
   # optim
   config.seed = 2023
 
@@ -78,7 +77,6 @@ def get_config():
   evaluate.pmap = False
   solver = config.solver
   # solver.outer_solver = 'eulermaruyama'
-  # solver.inner_solver = None
   solver.outer_solver = 'DDIMVP'
   solver.num_outer_steps = model.num_scales
   solver.eta = 1.0  # DDIM hyperparameter

@@ -4,6 +4,7 @@ import jax.random as random
 from scipy.stats import wasserstein_distance
 import numpy as np
 import scipy
+import matplotlib.animation as animation
 
 
 BG_ALPHA = 1.0
@@ -13,6 +14,20 @@ color_posterior = '#a2c4c9'
 color_algorithm = '#ff7878'
 dpi_val = 1200
 cmap = 'magma'
+
+
+def plot_animation(fig, ax, animate, frames, fname, fps=20, bitrate=800, dpi=300):
+  ani = animation.FuncAnimation(
+    fig, animate, frames=frames, interval=1, fargs=(ax,))
+  # Set up formatting for the movie files
+  Writer = animation.PillowWriter
+#   Writer = animation.FFMpegWriter
+  # To save the animation using Pillow as a gif
+  writer = Writer(fps=fps, metadata=dict(artist='Me'), bitrate=bitrate)
+  # Note that mp4 does not work on pdf
+#   ani.save('{}.mp4'.format(fname), writer=writer)
+  ani.save('{}.gif'.format(fname), writer=writer, dpi=dpi)
+#   plt.show()
 
 
 def plot_single_image(noise_std, dim, dim_y, timesteps, i, name, indices, samples, color=color_algorithm):
@@ -57,7 +72,6 @@ def sliced_wasserstein(rng, dist_1, dist_2, n_slices=100):
 
 
 def Wasserstein2(m1, C1, m2, C2):
-    C2_half = scipy.linalg.sqrtm(C2)
     C1_half = scipy.linalg.sqrtm(C1)
     C_half = jnp.asarray(np.asarray(np.real(scipy.linalg.sqrtm(C1_half @ C2 @ C1_half)), dtype=float))
     return jnp.linalg.norm(m1 - m2)**2 + jnp.trace(C1) + jnp.trace(C2) - 2 * jnp.trace(C_half)
@@ -67,53 +81,6 @@ def Distance2(m1, C1, m2, C2):
     C2_half = jnp.linalg.cholesky(C2)
     C1_half = jnp.linalg.cholesky(C1)
     return jnp.linalg.norm(m1 - m2)**2 + jnp.linalg.norm(C1_half - C2_half)**2
-
-
-def plot_samples(x, image_size=32, num_channels=3, fname="samples"):
-    img = image_grid(x, image_size, num_channels)
-    plt.figure(figsize=(8,8))
-    plt.axis('off')
-    plt.imshow(img, cmap=cmap)
-    plt.savefig(fname + '.png', bbox_inches='tight', pad_inches=0.0)
-    plt.savefig(fname + '.pdf', bbox_inches='tight', pad_inches=0.0)
-    plt.close()
-
-
-def image_grid(x, image_size, num_channels):
-    img = x.reshape(-1, image_size, image_size, num_channels)
-    w = int(np.sqrt(img.shape[0]))
-    return img.reshape((w, w, image_size, image_size, num_channels)).transpose((0, 2, 1, 3, 4)).reshape((w * image_size, w * image_size, num_channels))
-
-
-# def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA, x_max=5.0):
-#     x = np.linspace(-x_max, x_max, image_size)
-#     plt.xlim(-x_max, x_max)
-#     plt.ylim(-3.5, 3.5)
-#     plt.plot(x, samples[:, :, 0].T, alpha=alpha)
-#     plt.savefig(fname)
-#     plt.close()
-
-
-def plot_samples_1D(samples, image_size, fname="samples 1D.png", alpha=FG_ALPHA, x_max=5.0):
-    x = np.linspace(-x_max, x_max, image_size)
-    plt.plot(x, samples[:, :, 0, 0].T, alpha=alpha)
-    plt.savefig(fname)
-    plt.close()
-
-
-def plot_score_ax_sample(ax, sample, score, t, area_min=-1, area_max=1, fname="plot_score"):
-    @partial(jit, static_argnums=[0,])
-    def helper(score, sample, t, area_min, area_max):
-        x = jnp.linspace(area_min, area_max, 16)
-        x, y = jnp.meshgrid(x, x)
-        grid = jnp.stack([x.flatten(), y.flatten()], axis=1)
-        sample = jnp.tile(sample, (len(x.flatten()), 1, 1, 1))
-        sample.at[:, [0, 1], 0, 0].set(grid)
-        t = jnp.ones((grid.shape[0],)) * t
-        scores = score(sample, t)
-        return grid, scores
-    grid, scores = helper(score, sample, t, area_min, area_max)
-    ax.quiver(grid[:, 0], grid[:, 1], scores[:, 0, 0, 0], scores[:, 1, 0, 0])
 
 
 def plot(train_data, test_data, mean, variance,

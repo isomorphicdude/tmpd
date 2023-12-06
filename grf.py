@@ -6,7 +6,7 @@ from jax import jit, vmap
 import jax.random as random
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from diffusionjax.plot import plot_heatmap
+from diffusionjax.plot import plot_heatmap, plot_samples, plot_samples_1D
 from diffusionjax.solvers import EulerMaruyama
 import diffusionjax.sde as sde_lib
 from diffusionjax.utils import get_sampler
@@ -15,16 +15,12 @@ import lab as B
 import numpy as np
 from probit.approximators import LaplaceGP as GP
 from probit.utilities import log_gaussian_likelihood
-import scipy
 import logging
 import time
 from tmpd.plot import (
     Distance2,
     Wasserstein2,
-    plot,
-    plot, plot_samples,
-    plot_samples_1D
-)
+    plot)
 from tmpd.samplers import get_cs_sampler
 
 
@@ -86,10 +82,10 @@ def main(argv):
         # Reshape image data
         samples = samples.reshape(-1, config.data.image_size, config.data.image_size, config.data.num_channels)
         plot_samples(samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples")
-        plot_samples_1D(samples[:64], config.data.image_size, "samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(samples[:64, ..., 0], config.data.image_size, "samples_1D", alpha=FG_ALPHA)
 
     def nabla_log_pt(x, t):
-        """
+        r"""
         Args:
             x: One location in $\mathbb{R}^{image_size**2}$
             t: time
@@ -112,22 +108,23 @@ def main(argv):
             cov=C, shape=(config.eval.batch_size,))
         C_emp = jnp.cov(p_samples[:, :].T)
         m_emp = jnp.mean(p_samples[:, :].T, axis=1)
-        corr_emp = jnp.corrcoef(p_samples[:, :].T)
-        plot_heatmap(samples=p_samples[:, [0, 1]], area_min=-3, area_max=3, fname="target_prior_heatmap")
+        # corr_emp = jnp.corrcoef(p_samples[:, :].T)
+        plot_heatmap(samples=p_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="target_prior_heatmap")
 
         p_samples = p_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         p_samples = jnp.expand_dims(p_samples, axis=3)
         plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples_prior")
-        plot_samples_1D(p_samples, image_size=config.data.image_size, fname="analytic_prior_samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(p_samples[..., 0], image_size=config.data.image_size, fname="analytic_prior_samples_1D", alpha=FG_ALPHA)
         delta_t_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_t_var = jnp.linalg.norm(jnp.diag(C) - jnp.diag(C_emp)) / config.data.image_size
         delta_t_mean = jnp.linalg.norm(m_emp) / config.data.image_size
-        delta_t_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
+        # delta_t_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
         logging.info("analytic_prior delta_mean={}, delta_var={}, delta_cov={}".format(
             delta_t_mean, delta_t_var, delta_t_cov))
 
         # Running the reverse SDE with the true score
         solver = EulerMaruyama(sde.reverse(true_score), num_steps=config.solver.num_outer_steps)
+
         sampler= get_sampler((config.eval.batch_size//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels), solver)
         if config.eval.pmap:
             sampler = jax.pmap(sampler, axis_name='batch')
@@ -140,16 +137,16 @@ def main(argv):
 
         C_emp = jnp.cov(q_samples[:, :].T)
         m_emp = jnp.mean(q_samples[:, :].T, axis=1)
-        corr_emp = jnp.corrcoef(q_samples[:, :].T)
-        delta_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
+        # corr_emp = jnp.corrcoef(q_samples[:, :].T)
+        # delta_corr = jnp.linalg.norm(C - corr_emp) / config.data.image_size
         delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
-        plot_heatmap(samples=q_samples[:, [0, 1]], area_min=-3, area_max=3, fname="diffusion_prior_heatmap")
+        plot_heatmap(samples=q_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="diffusion_prior_heatmap")
 
         q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         q_samples = np.expand_dims(q_samples, axis=3)
         plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="diffusion_prior_samples")
-        plot_samples_1D(q_samples, image_size=config.data.image_size, fname="diffusion_prior_samples_1D", alpha=FG_ALPHA)
+        plot_samples_1D(q_samples[..., 0], image_size=config.data.image_size, fname="diffusion_prior_samples_1D", alpha=FG_ALPHA)
         delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
         delta_var = jnp.linalg.norm(jnp.diag(C) - jnp.diag(C_emp)) / config.data.image_size
         delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
@@ -183,12 +180,12 @@ def main(argv):
         # delta_mean = jnp.linalg.norm(m_emp) / config.data.image_size
         # logging.info("prior_PC_analytic delta_mean={}, delta_var={}, delta_cov={}".format(
         #     delta_mean, delta_var, delta_cov))
-        # plot_heatmap(samples=q_samples[:, [0, 1]], area_min=-3, area_max=3, fname="heatmap PC analytic score")
+        # plot_heatmap(samples=q_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="heatmap PC analytic score")
 
         # q_samples = q_samples.reshape(config.eval.batch_size, config.data.image_size, config.data.image_size)
         # q_samples = np.expand_dims(q_samples, axis=3)
         # plot_samples(p_samples[:64], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="samples prior PC")
-        # plot_samples_1D(q_samples, image_size=config.data.image_size, fname="samples prior PC 1D", alpha=FG_ALPHA)
+        # plot_samples_1D(q_samples[..., 0], image_size=config.data.image_size, fname="samples prior PC 1D", alpha=FG_ALPHA)
 
         # logging.info(delta_t_corr)  # a value of 0.05 (for 512 samples) are indistinguisable from
         # # true samples due to emprical covariance error
@@ -204,17 +201,23 @@ def main(argv):
     y_data = y.copy()
     X_data = X[idx_obs, :]
 
-
-    if 'plus' in config.sampling.cs_method:
+    if 'plus' in config.sampling.cs_method or 'mask' in config.sampling.cs_method:
         mask = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         mask = mask.at[idx_obs].set(1.0)
         y = jnp.zeros((config.data.image_size * config.data.image_size * config.data.num_channels,))
         y = y.at[idx_obs].set(y_data)
-        observation_map = lambda x: mask * x
-        adjoint_observation_map = lambda y: y
+        def observation_map(x):
+            x = x.flatten()
+            return mask * x
+        def adjoint_observation_map(y):
+            return y
     else:
-        observation_map = lambda x: H @ x
-        adjoint_observation_map = lambda y: H.T @ y
+        def observation_map(x):
+            x = x.flatten()  # for newer methods
+            return H @ x
+        # observation_map = lambda x: H @ x
+        # adjoint_observation_map = lambda y: H.T @ y
+        adjoint_observation_map = None
         mask = None
 
     def prior(prior_parameters):
@@ -237,9 +240,8 @@ def main(argv):
     plot_samples(jnp.expand_dims(predictive_variance.reshape(-1, 1), axis=0), image_size=config.data.image_size, num_channels=config.data.num_channels, fname="analytic_target_variance")
 
     stack_samples = False
-    # batch_sizes = jnp.array([9, 21, 45, 93, 189, 375, 753, 1500])
-    batch_sizes = jnp.array([1500])
-    num_repeats = 1
+    batch_sizes = np.array([9, 21, 45, 93, 189, 375, 753, 1500], dtype=np.int32)
+    num_repeats = 3
 
     ds_target = np.zeros((batch_sizes.size, num_repeats))
     ds_diffusion = np.zeros((batch_sizes.size, num_repeats))
@@ -249,7 +251,7 @@ def main(argv):
     times_diffusion = np.zeros((batch_sizes.size, num_repeats))
     for j, batch_size in enumerate(batch_sizes):
         logging.info("\nbatch_size={}".format(batch_size))
-        sampling_shape = (batch_size//num_devices, config.data.image_size, config.data.image_size, config.data.num_channels)
+        sampling_shape = (int(batch_size//num_devices), int(config.data.image_size), int(config.data.image_size), int(config.data.num_channels))
         sampler = get_cs_sampler(
             config, sde, true_score, sampling_shape,
             config.sampling.inverse_scaler,
@@ -269,7 +271,7 @@ def main(argv):
             times_target[j, r] = time_delta
 
             if batch_size > 20 or jnp.isfinite(jnp.cov(p_samples[:, :].T)).all():
-                plot_heatmap(samples=p_samples[:, [0, 1]], area_min=-3, area_max=3, fname="analytic_heatmap")
+                plot_heatmap(samples=p_samples[:, [0, 1]], area_bounds=[-3., 3.], fname="analytic_heatmap")
                 C_emp = jnp.cov(p_samples[:, :].T)
                 m_emp = jnp.mean(p_samples[:, :].T, axis=1)
                 delta_cov = jnp.linalg.norm(C - C_emp) / config.data.image_size
@@ -293,7 +295,7 @@ def main(argv):
                 logging.info('distance chol [{}] {} seconds'.format(d2, td2delta))
 
             p_samples = p_samples.reshape((batch_size,) + sampling_shape[1:])
-            plot_samples_1D(p_samples, image_size=config.data.image_size, fname="target_samples_1D", alpha=FG_ALPHA)
+            plot_samples_1D(p_samples[..., 0], image_size=config.data.image_size, fname="target_samples_1D", alpha=FG_ALPHA)
             plot_samples(p_samples[:int(batch_size**0.5)**2,], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="target_samples")
 
             if 1:
@@ -338,7 +340,7 @@ def main(argv):
                     logging.info('distance chol [{}] {} seconds'.format(d2, td2delta))
 
                 samples = samples.reshape(-1, config.data.image_size, config.data.image_size, config.data.num_channels)
-                plot_samples_1D(samples, image_size=config.data.image_size, fname="diffusion_samples_1D", alpha=FG_ALPHA)
+                plot_samples_1D(samples[..., 0], image_size=config.data.image_size, fname="diffusion_samples_1D", alpha=FG_ALPHA)
                 plot_samples(samples[:int(batch_size**0.5)**2], image_size=config.data.image_size, num_channels=config.data.num_channels, fname="diffusion_samples")
 
         np.savez('./example_{}.npz'.format(config.sampling.cs_method.lower()),
