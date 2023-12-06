@@ -3,9 +3,7 @@
 
 This repo contains the official implementation for the paper [Tweedie Moment Projected Diffusions for Inverse Problems](https://arxiv.org/pdf/2310.06721.pdf).
 
-![cover-img2](./README_0.05_ground_FFHQ.png)
-![cover-img0](./README_0.05_observed_FFHQ.png)
-![cover-img1](./README_FFHQ_0.05_kpsmldplus.png)
+![cover-img1](./README_FFHQ_0.05.png)
 ![result-git0](./README_FFHQ_0.05_kpsmldplus.gif)
 
 Contents:
