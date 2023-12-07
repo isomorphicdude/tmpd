@@ -17,7 +17,8 @@ Contents:
     - [Gaussian](#gaussian)
     - [Gaussian Mixture Model](#gmm)
     - [Noisy inpainting, super resolution and deblur](#noisy-inpainting,-super-resolution-and-deblur)
-- [References](#references)
+- [Does haves](#does-haves)
+- [Doesn't haves](#doesn't-haves)
 
 ## Installation
 The package requires Python 3.7. First, it is recommended to [create a new python virtual environment](https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands). This package depends on an old version of tensorflow to be compatible with the pretrained diffusion models. First, [install `tensorflow=2.7.0`](https://www.tensorflow.org/install/pip).
@@ -98,3 +99,14 @@ python main.py:
   --mode: <inpainting|super_resolution|deblur>: Run sampling on: inpainting, super_resolution or deblur.
   --workdir: Working directory.
 ```
+
+## Does haves
+- Bayesian inversion (inverse problems) with linear observation maps such as: super-resolution, inpainting, deblur, and easily extendable to non-linear observation operators.
+- Implementations TMPD as well as other baselines, [PiGDM](https://openreview.net/forum?id=9_gsMA8MRKQ) and [DPS](https://arxiv.org/abs/2209.14687).
+- DDIM, DDPM, SMLD samplers/Markov chains.
+- Get started with the fully reproducible numerical experiments from our paper, provided.
+
+## Doesn't haves
+- Medical imaging inverse problem examples.
+- Text-guided image editing.
+
