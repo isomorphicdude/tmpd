@@ -7,6 +7,10 @@ This repo contains the official implementation for the paper [Tweedie Moment Pro
 
 ![cover-img1](./readme_FFHQ_0.05.png)
 
+![nPlan](readme_nplan.png)
+
+Thank you to [nPlan](https://www.nplan.io/), who are supporting this project.
+
 Contents:
 - [Installation](#installation)
 - [Experiments](#experiments)
@@ -16,8 +20,7 @@ Contents:
 - [References](#references)
 
 ## Installation
-The package requires Python 3.7. First, it is recommended to [create a new python virtual environment](https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands). 
-Install `tensorflow=2.7.0`. This package depends on an old version of tensorflow to be compatible with the pretrained diffusion models. First, [install tensorflow 2.7.0](https://www.tensorflow.org/install/pip).
+The package requires Python 3.7. First, it is recommended to [create a new python virtual environment](https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands). This package depends on an old version of tensorflow to be compatible with the pretrained diffusion models. First, [install `tensorflow=2.7.0`](https://www.tensorflow.org/install/pip).
 
 ```
 pip install --upgrade pip
@@ -25,14 +28,14 @@ conda install -c conda-forge cudatoolkit=11.8.0
 python3 -m pip install nvidia-cudnn-cu11==8.6.0.163 tensorflow==2.7.0
 ```
 
-Install `jax==0.2.18`. This package depends on an old version JAX to be compatible with the pretrained diffusion models. Note the JAX installation is different depending on your CUDA version, so you may have to install JAX differently than below.
+Then, install `jax==0.2.18`. This package depends on an old version JAX to be compatible with the pretrained diffusion models. Note the JAX installation is different depending on your CUDA version, so you may have to install JAX differently than below.
 ```sh
 'pip install jax==0.2.18 jaxlib==0.1.69+cuda111 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
 ```
 
 Make sure the tensorflow and jax versions are as above and are working on your accelerator. Then,
 - Install `diffusionjax` (you may need to remove the dependency of orbax and optax, which conflicts with Python 3.7).
-- Clone the repository https://github.com/fedebotu/clone-anonymous-github
+- Clone the repository `git clone git@github.com:bb515/tmpd.git`.
 - Install using pip `pip install -e .` from the working directory of this README file (see the `setup.py` for the requirements that this command installs).
 
 ## Experiments
@@ -76,13 +79,13 @@ python main.py:
   --workdir: Working directory.
 ```
 
-* `config` is the path to the config file. They are adapted from [https://github.com/yang-song/score_sde/tree/main#:~:text=workdir%3A%20Working%20directory-,config,-is%20the%20path](here). Our prescribed config files are provided in `configs/`.
+* `config` is the path to the config file. They are adapted from [these configurations](https://github.com/yang-song/score_sde/tree/main/configs). Our prescribed config files are provided in `configs/`.
 
-*  `workdir` is the path that stores all artifacts of one experiment, like checkpoints, which are required for loading the score model.
+*  `workdir` is the path that stores all artifacts of an experiment, like checkpoints, which are required for loading the score model.
 
 * `eval_folder` is the name of a subfolder in `workdir` that stores all artifacts of the evaluation process, like image samples, and numpy dumps of quantitative results.
 
-* `mode` is either "inpainting", "super_resolution" or "deblur". When set to {"inpainting", "super_resolution", "deblur"}, it performs an {inpainting, super resolution, deblur} experiment.
+* `mode` is the inverse problem. When set to {"eval_inpainting", "eval_super_resolution", "eval_deblur"}, it performs our {inpainting, super resolution, deblur} experiment.
 
 The experimental setup can be configured through the config file and the experimental parameters within `run_lib.py`.
 
