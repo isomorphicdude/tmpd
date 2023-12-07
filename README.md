@@ -102,7 +102,7 @@ python main.py:
 
 ## Does haves
 - Bayesian inversion (inverse problems) with linear observation maps such as: super-resolution, inpainting, deblur, and easily extendable to non-linear observation operators.
-- Implementations TMPD as well as other baselines, [ΠGDM](https://openreview.net/forum?id=9_gsMA8MRKQ) and [DPS](https://arxiv.org/abs/2209.14687).
+- Implementations of TMPD as well as other baselines, such as [ΠGDM](https://openreview.net/forum?id=9_gsMA8MRKQ) and [DPS](https://arxiv.org/abs/2209.14687).
 - DDIM, DDPM, SMLD samplers/Markov chains.
 - Get started with the fully reproducible numerical experiments from our paper, provided.
 
