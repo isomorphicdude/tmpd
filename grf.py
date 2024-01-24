@@ -67,6 +67,7 @@ def main(argv):
         logging.info("VP SDE")
         import inspect
         args = inspect.signature(sde_lib.VP.__init__)
+        logging.info(sde_lib.vp.__module__)
         logging.info(args)
         sde = sde_lib.VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
     elif config.training.sde.lower()=='vesde':
