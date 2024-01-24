@@ -28,7 +28,7 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file(
     "config", "./configs/grf.py", "Training configuration.", lock_config=True)
 flags.DEFINE_string("workdir", "./workdir/", "Work directory.")
-flags.mark_flags_as_required(["workdir", "config"])
+# flags.mark_flags_as_required(["workdir", "config"])
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +63,11 @@ def main(argv):
 
     # Setup SDE
     if config.training.sde.lower()=='vpsde':
+        # list the keyword arguments of sde_lib.VP
+        logging.info("VP SDE")
+        import inspect
+        args = inspect.getfullargspec(sde_lib.VP).args
+        logging.info(args)
         sde = sde_lib.VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
     elif config.training.sde.lower()=='vesde':
         sde = sde_lib.VE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max)
