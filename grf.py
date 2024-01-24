@@ -66,7 +66,7 @@ def main(argv):
         # list the keyword arguments of sde_lib.VP
         logging.info("VP SDE")
         import inspect
-        args = inspect.getfullargspec(sde_lib.VP).args
+        args = inspect.signature(sde_lib.VP.__init__)
         logging.info(args)
         sde = sde_lib.VP(beta_min=config.model.beta_min, beta_max=config.model.beta_max)
     elif config.training.sde.lower()=='vesde':
